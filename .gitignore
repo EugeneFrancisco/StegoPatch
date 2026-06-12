@@ -1,4 +1,4 @@
-./CLAUDE.local.md
-./venv/*
-./models/*
-./data/*
+CLAUDE.local.md
+venv/
+data/
+.DS_Store
