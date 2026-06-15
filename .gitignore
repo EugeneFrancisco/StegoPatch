@@ -2,5 +2,5 @@ CLAUDE.local.md
 venv/
 data/
 .DS_Store
-src/__pycache__/*
-__pycache__/*
+__pycache__/
+*.pyc
