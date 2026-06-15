@@ -7,6 +7,7 @@ import torch.nn as nn
 from torchvision.models import resnet50
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
+import src.utils as utils
 
 class Reshape(nn.Module):
     """
@@ -76,6 +77,14 @@ class RoSteALS(ImageWatermarker):
 
         # The ResNet-50 that recovers the message from a (watermarked) image.
         self.secret_decoder = self.setup_secret_decoder().to(self.device)
+
+        # ===== Training Hyperparameters are below =======
+
+        # Controls the weight of the MSE loss for the quality loss objective.
+        self.alpha = self.configs["alpha"]
+
+        # Controls the weight of the quality loss objective.
+        self.beta = self.configs["beta"]
 
     def setup_message_encoder(self) -> nn.Module:
         """
@@ -195,7 +204,9 @@ class RoSteALS(ImageWatermarker):
         assert stego_image.shape == (self.h_image, self.w_image, self.c_image)
 
         # numpy -> torch: (H, W, C) -> (1, C, H, W), onto device.
-        image_t = torch.from_numpy(stego_image).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
+        image_t = torch.from_numpy(
+            stego_image
+        ).float().permute(2, 0, 1).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
             logits = self.decode_batch(image_t)
@@ -216,7 +227,7 @@ class RoSteALS(ImageWatermarker):
             recovered_messages: torch.Tensor
         ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Returns a tuple of (quality loss, recovery loss) for the passed in data.
+        Returns the batch loss of the passed in data.
         Args:
             covers: a (B, C, H, W) tensor of images that were used to create watermarks.
             messages: a (B, message_length) tensor of messages that were encoded.
@@ -226,8 +237,19 @@ class RoSteALS(ImageWatermarker):
                 watermarked images.
 
         Returns:
-            A tuple where the first element of the tuple of the quality loss and the second element
-            is the recovery loss. For definitions of what these are, check the Bui et al. paper.
+            The total loss, which is a weighted sum between a quality loss and recovery loss.
         """
 
         # Calculate the MSE loss between the covers and the stego_images.
+        covers_yuv = utils.rgb_to_yuv(covers)
+        stego_images_yuv = utils.rgb_to_yuv(stego_images)
+        loss_mse = nn.functional.mse_loss(stego_images_yuv, covers_yuv)
+
+        # Calculate the LPIPS loss between the covers and the stego images.
+        loss_lpips = utils.lpips_loss(covers, stego_images)
+
+        loss_quality = loss_lpips + self.alpha * loss_mse
+
+        # Calculate the recovery loss.
+        loss_recovery = utils.bce_loss(recovered_messages, messages)
+        return loss_recovery + self.beta * loss_quality
