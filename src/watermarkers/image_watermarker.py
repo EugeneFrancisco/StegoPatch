@@ -3,6 +3,7 @@ This file defines the abstract base class that Image Watermarkers will inherit f
 """
 from abc import ABC, abstractmethod
 import numpy as np
+import torch
 
 class ImageWatermarker(ABC):
     """
@@ -27,7 +28,7 @@ class ImageWatermarker(ABC):
         """
 
     @abstractmethod
-    def train(self) -> None:
+    def train(self, images: torch.Tensor) -> None:
         """
         This function should train anything that will be needed for watermarking later on.
         For example, if the watermarker uses an encoder decoder scheme for its steganogophy, then

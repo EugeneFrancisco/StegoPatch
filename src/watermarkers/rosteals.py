@@ -1,9 +1,12 @@
 """
 This file defines an image watermarker using RoSteALS method from Bui et al.
 """
+import os
+import shutil
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import resnet50
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.vqgan import VQGAN
@@ -80,11 +83,23 @@ class RoSteALS(ImageWatermarker):
 
         # ===== Training Hyperparameters are below =======
 
+        # The number of training epochs.
+        self.num_epochs: int = self.configs["num_epochs"]
+
+        # The batch size.
+        self.batch_size: int = self.configs["batch_size"]
+
         # Controls the weight of the MSE loss for the quality loss objective.
-        self.alpha = self.configs["alpha"]
+        self.alpha: float = self.configs["alpha"]
 
         # Controls the weight of the quality loss objective.
-        self.beta = self.configs["beta"]
+        self.beta: float = self.configs["beta"]
+
+        # Where TensorBoard training logs are written.
+        self.tensorboard_log_dir: str = self.configs.get("tensorboard_log_dir", "runs/rosteals")
+
+        # The TensorBoard writer used to log losses during training.
+        self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
 
     def setup_message_encoder(self) -> nn.Module:
         """
@@ -215,9 +230,62 @@ class RoSteALS(ImageWatermarker):
         bits = (logits.squeeze(0) > 0).float().reshape(self.message_length, 1)
         return bits.cpu().numpy()
 
-    def train(self) -> None:
-        # TODO
-        pass
+    def train(self, images: torch.Tensor) -> None:
+        """
+        Trains the message encoder and secret decoder on a dataset of cover images.
+        The frozen image autoencoder is used as-is; only the message encoder and
+        secret decoder are optimized.
+
+        Args:
+            images: a (N, C, H, W) float tensor in [0, 1] of cover images.
+        """
+        self.message_encoder.train()
+        self.secret_decoder.train()
+
+        # Clear any existing TensorBoard data so this run starts fresh.
+        self.tensorboard.close()
+        if os.path.exists(self.tensorboard_log_dir):
+            shutil.rmtree(self.tensorboard_log_dir)
+        self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
+
+        optimizer = torch.optim.Adam(
+            list(self.message_encoder.parameters())
+            + list(self.secret_decoder.parameters())
+        )
+
+        num_images = images.shape[0]
+        step = 0
+        for epoch in range(self.num_epochs):
+            # Shuffle the images at the start of each epoch.
+            perm = torch.randperm(num_images)
+            for start in range(0, num_images, self.batch_size):
+                covers = images[perm[start:start + self.batch_size]].to(self.device)
+
+                # Sample random binary messages, one per cover in the batch.
+                messages = torch.randint(
+                    0, 2, (covers.shape[0], self.message_length), device=self.device
+                ).float()
+
+                # Watermark, then try to recover the message.
+                stego_images = self.encode_batch(covers, messages)
+                recovered_messages = self.decode_batch(stego_images)
+
+                recovery_loss, quality_loss = self.get_loss(
+                    covers, messages, stego_images, recovered_messages
+                )
+
+                total_loss = recovery_loss + self.beta * quality_loss
+                optimizer.zero_grad()
+                total_loss.backward()
+                optimizer.step()
+
+                # Log the losses for this batch to TensorBoard.
+                self.tensorboard.add_scalar("loss/recovery", recovery_loss.item(), step)
+                self.tensorboard.add_scalar("loss/quality", quality_loss.item(), step)
+                self.tensorboard.add_scalar("loss/total", total_loss.item(), step)
+                step += 1
+
+            print(f"Epoch {epoch + 1}/{self.num_epochs}, loss: {total_loss.item():.4f}")
 
     def get_loss(
             self,
@@ -227,7 +295,7 @@ class RoSteALS(ImageWatermarker):
             recovered_messages: torch.Tensor
         ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Returns the batch loss of the passed in data.
+        Return a tuple of (recovery loss, quality loss).
         Args:
             covers: a (B, C, H, W) tensor of images that were used to create watermarks.
             messages: a (B, message_length) tensor of messages that were encoded.
@@ -237,7 +305,7 @@ class RoSteALS(ImageWatermarker):
                 watermarked images.
 
         Returns:
-            The total loss, which is a weighted sum between a quality loss and recovery loss.
+            A tuple of (recovery loss, quality loss).
         """
 
         # Calculate the MSE loss between the covers and the stego_images.
@@ -252,4 +320,4 @@ class RoSteALS(ImageWatermarker):
 
         # Calculate the recovery loss.
         loss_recovery = utils.bce_loss(recovered_messages, messages)
-        return loss_recovery + self.beta * loss_quality
+        return (loss_recovery, loss_quality)

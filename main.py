@@ -1,6 +1,4 @@
 # pylint: skip-file
-import random
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +6,7 @@ import torch
 from PIL import Image
 
 from src.autoencoders.vqgan import VQGAN
+from src.utils import load_random_image, load_random_images
 from src.watermarkers.rosteals import RoSteALS
 
 DEVICE = "mps"
@@ -17,27 +16,6 @@ DATA_DIR = Path("data/train2017")
 IMAGE_SIZE = 256
 MESSAGE_LENGTH = 100
 BATCH_SIZE = 4
-
-
-@lru_cache(maxsize=None)
-def list_images(data_dir: Path) -> tuple[Path, ...]:
-    """Scans data_dir for jpgs once and caches the result (scanning 118k files is slow)."""
-    return tuple(data_dir.glob("*.jpg"))
-
-
-def load_random_image(data_dir: Path, size: int) -> np.ndarray:
-    """Loads a random image as an (H, W, C) float array in [0, 1], resized to a square."""
-    path = random.choice(list_images(data_dir))
-    image = Image.open(path).convert("RGB").resize((size, size))
-    return np.asarray(image, dtype=np.float32) / 255.0
-
-
-def load_random_images(data_dir: Path, size: int, batch_size: int) -> torch.Tensor:
-    """Loads batch_size random images as a (batch_size, C, H, W) float tensor in [0, 1]."""
-    images = [load_random_image(data_dir, size) for _ in range(batch_size)]
-    batch = np.stack(images, axis=0)  # (batch_size, H, W, C)
-    batch = np.transpose(batch, (0, 3, 1, 2))  # (batch_size, C, H, W)
-    return torch.from_numpy(batch)
 
 
 def main():
@@ -72,7 +50,7 @@ def main():
     stego_images = rosteals.encode_batch(covers, messages)
     recovered_messages = rosteals.decode_batch(stego_images)
 
-    loss = rosteals.get_loss(
+    recovery_loss, quality_loss = rosteals.get_loss(
         covers,
         messages,
         stego_images,
