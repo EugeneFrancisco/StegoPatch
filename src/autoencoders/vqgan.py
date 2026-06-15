@@ -6,10 +6,11 @@ a downsampling factor of 4, 3 latent channels, and an 8192-entry codebook. We lo
 the pre-converted ``xvjiarui/ldm-vq-f4`` checkpoint through ``diffusers.VQModel``,
 which provides the matching architecture so we only ever deal with the weights.
 
-Images are ``np.ndarray`` of shape ``(H, W, C)`` with float values in ``[0, 1]``.
-Latents are ``np.ndarray`` of shape ``(3, H // 4, W // 4)``.
+This is a torch-native interface: images are ``(B, C, H, W)`` tensors with float
+values in ``[0, 1]`` and latents are ``(B, 3, H // 4, W // 4)`` tensors, both on
+the model's device. ``encode``/``decode`` are differentiable so gradients flow
+through the (frozen) autoencoder to the watermarker during training.
 """
-import numpy as np
 import torch
 from diffusers import VQModel
 
@@ -25,7 +26,11 @@ class VQGAN(AutoEncoder):
 
     def __init__(self, device: str | None = None):
         self.device = torch.device(device or self._default_device())
-        self.model = VQModel.from_pretrained(self.MODEL_ID).eval().to(self.device)
+        # Frozen in RoSteALS: eval mode + no parameter grads. Gradients still flow
+        # *through* the autoencoder to the message encoder during training; the
+        # autoencoder's own weights just never update.
+        self.model = VQModel.from_pretrained(self.MODEL_ID).eval().requires_grad_(False)
+        self.model = self.model.to(self.device)
 
     @staticmethod
     def _default_device() -> str:
@@ -36,37 +41,33 @@ class VQGAN(AutoEncoder):
             return "mps"
         return "cpu"
 
-    def encode(self, image: np.ndarray) -> np.ndarray:
+    def encode(self, images: torch.Tensor) -> torch.Tensor:
         """
-        Returns the (continuous, pre-quantization) latent of the image.
+        Returns the (continuous, pre-quantization) latents of a batch of images.
 
         Quantization is deferred to :meth:`decode` so downstream watermarking can
-        operate on the continuous latent space, following Bui et al.
+        operate on the continuous latent space, following Bui et al. Expects a
+        ``(B, C, H, W)`` tensor in ``[0, 1]`` on the model's device.
         """
-        tensor = self._image_to_tensor(image)
-        with torch.no_grad():
-            latents = self.model.encode(tensor).latents
-        return latents.squeeze(0).cpu().numpy()
+        images = images * 2.0 - 1.0  # the model works in [-1, 1]
+        return self.model.encode(images).latents
 
-    def decode(self, latent_variable: np.ndarray) -> np.ndarray:
+    def decode(self, latents: torch.Tensor) -> torch.Tensor:
         """
-        Returns the image reconstructed from a latent produced by :meth:`encode`.
+        Returns the images reconstructed from latents produced by :meth:`encode`.
 
-        The latent is vector-quantized to the nearest codebook entries before being
-        decoded back into pixel space.
+        The latents are vector-quantized to the nearest codebook entries before
+        being decoded back into pixel space. The output is in ``[0, 1]`` but is
+        left unclamped so it stays differentiable everywhere; clamp at the point
+        the tensor is turned back into an image.
         """
-        tensor = torch.from_numpy(latent_variable).float().unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            image = self.model.decode(tensor).sample
-        return self._tensor_to_image(image)
+        images = self.model.decode(latents).sample
+        return images / 2.0 + 0.5  # back to [0, 1]
 
-    def _image_to_tensor(self, image: np.ndarray) -> torch.Tensor:
-        """Converts an ``(H, W, C)`` image in ``[0, 1]`` to a ``(1, C, H, W)`` tensor in ``[-1, 1]``."""
-        tensor = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0)
-        return (tensor * 2.0 - 1.0).to(self.device)
-
-    @staticmethod
-    def _tensor_to_image(tensor: torch.Tensor) -> np.ndarray:
-        """Converts a ``(1, C, H, W)`` tensor in ``[-1, 1]`` back to an ``(H, W, C)`` image in ``[0, 1]``."""
-        tensor = (tensor.squeeze(0) / 2.0 + 0.5).clamp(0.0, 1.0)
-        return tensor.permute(1, 2, 0).cpu().numpy()
+    @classmethod
+    def get_latent_dim(cls, h_image: int, w_image: int) -> tuple:
+        return (
+            cls.LATENT_CHANNELS,
+            h_image / cls.SHRINK_FACTOR,
+            w_image / cls.SHRINK_FACTOR
+        )
