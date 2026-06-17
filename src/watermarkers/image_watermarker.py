@@ -3,7 +3,6 @@ This file defines the abstract base class that Image Watermarkers will inherit f
 """
 from abc import ABC, abstractmethod
 import numpy as np
-import torch
 
 class ImageWatermarker(ABC):
     """
