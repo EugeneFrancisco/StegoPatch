@@ -69,16 +69,6 @@ class RoSteALS(ImageWatermarker):
         # The ResNet-50 that recovers the message from a (watermarked) image.
         self.secret_decoder = self.setup_secret_decoder().to(self.device)
 
-        # ImageNet per-channel mean/std used to normalize images in [0, 1] before
-        # feeding them to the (ImageNet-pretrained) secret decoder. Shaped (1, 3, 1, 1)
-        # to broadcast over a (B, C, H, W) batch.
-        self.imagenet_mean = torch.tensor(
-            [0.485, 0.456, 0.406], device=self.device
-        ).reshape(1, 3, 1, 1)
-        self.imagenet_std = torch.tensor(
-            [0.229, 0.224, 0.225], device=self.device
-        ).reshape(1, 3, 1, 1)
-
         # ===== Training Hyperparameters are below =======
 
         # AdamW learning rate
@@ -86,6 +76,12 @@ class RoSteALS(ImageWatermarker):
 
         # The number of training epochs.
         self.num_epochs: int = self.configs["num_epochs"]
+
+        # The number of training epochs before we expose the model to the full training set.
+        self.num_epochs_for_small_batch: int = self.configs["num_epochs_for_small_batch"]
+
+        # The size of the actual training data.
+        self.training_data_size: int = self.configs["training_data_size"]
 
         # The number of training examples used until the bit accuracy crosses 0.9.
         self.training_subset_size: int = self.configs["training_subset_size"]
@@ -102,7 +98,12 @@ class RoSteALS(ImageWatermarker):
         # Once we begin scheduling beta, we will linearly increase from beta to
         # beta_max by beta_delta
         self.beta_max: float = self.configs["beta_max"]
-        self.beta_delta: float = self.configs["beta_delta"]
+
+        # The offset we apply to delta each time we add to it.
+        self.beta_delta: float = (
+            (self.beta_max - self.beta)
+            / (self.num_epochs * (self.training_data_size / self.batch_size))
+        )
 
         # An update flag for when we can begin linearly increasing beta.
         self.update_flag: bool = False
@@ -223,20 +224,15 @@ class RoSteALS(ImageWatermarker):
 
     def decode_batch(self, stego_images: torch.Tensor) -> torch.Tensor:
         """
-        Recovers the message logits from a batch of images, fully in torch and
-        differentiable end to end. This is the interface used during training.
-
+        Recovers the message logits from a batch of images.
+        This is the interface used during training.
         Args:
             stego_images: a (B, C, H, W) float tensor in [0, 1] on ``self.device``.
-
         Returns:
             A (B, message_length) tensor of raw logits (apply a sigmoid for
             per-bit probabilities, or threshold at 0 for hard bits).
         """
-        # The decoder is ImageNet-pretrained, so normalize the [0, 1] images with
-        # the ImageNet mean/std it was trained on before decoding.
-        normalized = (stego_images - self.imagenet_mean) / self.imagenet_std
-        return self.secret_decoder(normalized)
+        return self.secret_decoder(stego_images)
 
     def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
         """
@@ -270,21 +266,31 @@ class RoSteALS(ImageWatermarker):
         # Timestamp of when training started, used to name the saved weights.
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+        # Where checkpoints are written (a Modal Volume path when run remotely).
+        models_dir = self.configs.get("models_dir", "models")
+
         baby_dataset = Subset(dataset, range(min(self.training_subset_size, len(dataset))))
 
         # Train until bit accuracy is 0.9. The baby_dataset contains only a couple minibatches
         # worth of images so the max_epochs here is large because we want to do many passes over
         # those images.
-        self.train_until(baby_dataset, bit_accuracy_threshold=0.9, max_epochs=4000)
+        self.train_until(
+                        baby_dataset,
+                        bit_accuracy_threshold=0.9,
+                        max_epochs=self.num_epochs_for_small_batch
+                        )
+
         self.update_flag = True
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint1.pt")
 
         # Train until bit accuracy is 0.98.
         self.train_until(dataset, bit_accuracy_threshold=0.98)
+        self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
 
         # TODO, insert noise model
         self.train_until(dataset, max_epochs = 2)
 
-        self.save_model(f"models/rosteals_{start_time}.pt")
+        self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
 
     def save_model(self, path: str = "models/rosteals.pt") -> None:
         """
@@ -317,8 +323,8 @@ class RoSteALS(ImageWatermarker):
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        for epoch in range(max_epochs):
-            for covers in tqdm(loader, desc=f"epoch {epoch}"):
+        for _ in tqdm(range(max_epochs), desc="epochs"):
+            for covers in loader:
                 covers = covers.to(self.device)
 
                 # Random {0, 1} messages, one per cover in the batch.
@@ -329,9 +335,8 @@ class RoSteALS(ImageWatermarker):
                 stego_images = self.encode_batch(covers, messages)
                 recovered_messages = self.decode_batch(stego_images)
 
-                loss_recovery, loss_quality = self.get_loss(
-                    covers, messages, stego_images, recovered_messages
-                )
+                loss_recovery = self.get_recovery_loss(messages, recovered_messages)
+                loss_quality = self.get_quality_loss(covers, stego_images)
                 loss = loss_recovery + self.beta * loss_quality
 
                 self.optimizer.zero_grad()
@@ -349,7 +354,7 @@ class RoSteALS(ImageWatermarker):
 
                 if bit_accuracy_threshold is not None and bit_accuracy >= bit_accuracy_threshold:
                     return
-            self.update_beta()
+                self.update_beta()                
 
     def update_beta(self):
         """
@@ -360,28 +365,22 @@ class RoSteALS(ImageWatermarker):
             return
         self.beta += self.beta_delta
 
-    def get_loss(
+    def get_quality_loss(
             self,
             covers: torch.Tensor,
-            messages: torch.Tensor,
             stego_images: torch.Tensor,
-            recovered_messages: torch.Tensor
-        ) -> tuple[torch.Tensor, torch.Tensor]:
+        ) -> torch.Tensor:
         """
-        Return a tuple of (recovery loss, quality loss).
+        Return the quality loss on the passed in data.
         Args:
             covers: a (B, C, H, W) tensor of images that were used to create watermarks.
-            messages: a (B, message_length) tensor of messages that were encoded.
             stego_images: a (B, C, H, W) tensor of images that have been watermarked with the passed
                 in messages.
-            recovered_messages: a (B, message_length) tensor of recovered messages from the
-                watermarked images.
-
         Returns:
             A tuple of (recovery loss, quality loss).
         """
 
-        # Calculate the MSE loss between the covers and the stego_images.
+        # Calculate the MSE loss between the covers and thT stego_images.
         covers_yuv = utils.rgb_to_yuv(covers)
         stego_images_yuv = utils.rgb_to_yuv(stego_images)
         loss_mse = nn.functional.mse_loss(stego_images_yuv, covers_yuv)
@@ -390,7 +389,21 @@ class RoSteALS(ImageWatermarker):
         loss_lpips = utils.lpips_loss(covers, stego_images)
 
         loss_quality = loss_lpips + self.alpha * loss_mse
+        return loss_quality
 
-        # Calculate the recovery loss.
+    def get_recovery_loss(
+            self,
+            messages: torch.Tensor,
+            recovered_messages: torch.Tensor
+        ) -> torch.Tensor:
+        """
+        Return the recovery loss on the passed in data.
+        Args:
+            messages: a (B, message_length) tensor of messages that were encoded.
+            recovered_messages: a (B, message_length) tensor of recovered messages from the
+                watermarked images.
+        Returns:
+            The torch tensor with the recovery loss.
+        """
         loss_recovery = utils.bce_loss(recovered_messages, messages)
-        return (loss_recovery, loss_quality)
+        return loss_recovery

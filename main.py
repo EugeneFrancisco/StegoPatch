@@ -10,8 +10,6 @@ from src.autoencoders.vqgan import VQGAN
 import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
 
-DEVICE = "mps"
-
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 IMAGE_SIZE = 256
@@ -28,14 +26,31 @@ ALPHA = 1.5
 BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = 1
-NUM_EPOCHS = 20
-LEARNING_RATE = 1e-4
-TRAINING_SUBSET_SIZE = 8
+NUM_EPOCHS_FOR_LARGE_BATCH = 20
+NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
+LEARNING_RATE = 2e-5
+TRAINING_SUBSET_SIZE = 4
+TRAINING_DATA_SIZE = 50_000
 
 
-def main():
+def get_default_device() -> str:
+    """Picks the best available torch device (cuda on Modal, mps locally)."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def main(
+    data_path: Path = Path("data/train2017_numpy_256.npy"),
+    device: str | None = None,
+    models_dir: str = "models",
+    tensorboard_log_dir: str = "runs/rosteals",
+):
+    device = device or get_default_device()
     configs = {
-        "device": "mps",
+        "device": device,
         "autoencoder_type": "VQGAN",
         "message_length": MESSAGE_LENGTH,
         "c_image": C_IMAGE,
@@ -49,29 +64,18 @@ def main():
         "beta_max": BETA_MAX,
         "beta_delta": BETA_DELTA,
         "learning_rate": LEARNING_RATE,
-        "num_epochs": NUM_EPOCHS,
+        "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
+        "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
-        "training_subset_size": TRAINING_SUBSET_SIZE
+        "training_subset_size": TRAINING_SUBSET_SIZE,
+        "training_data_size": TRAINING_DATA_SIZE,
+        "models_dir": models_dir,
+        "tensorboard_log_dir": tensorboard_log_dir,
     }
     rosteals = RoSteALS(configs)
-
-    # One image stuff
-    # image = load_random_image(DATA_DIR, IMAGE_SIZE)
-    # message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    # watermarked = rosteals.encode_image(image, message)
-    # recovered = rosteals.decode_image(watermarked)
-    # # Save the original and reconstruction side by side so the round-trip is visible.
-    # side_by_side = np.concatenate([image, watermarked], axis=1)
-    # out = Image.fromarray((side_by_side * 255).round().astype(np.uint8))
-    # out.save("results/roundtrip.png")
-    # print("Wrote roundtrip.png (original | reconstruction)")
-
-    dataset = utils.NpyImageDataset(Path("data/train2017_numpy_256.npy"))
-    dataset = Subset(dataset, range(15000))
+    dataset = utils.NpyImageDataset(data_path)
+    dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
     rosteals.train(dataset)
-
-    # images = utils.load_random_images(DATA_DIR, IMAGE_SIZE, 1000)
-    # rosteals.train(images)
     
 
 
