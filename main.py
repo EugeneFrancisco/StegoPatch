@@ -76,10 +76,7 @@ def main(
         "tensorboard_log_dir": tensorboard_log_dir,
     }
     rosteals = RoSteALS(configs)
-    rosteals.restart_training(
-        save_path = "models/rosteals_2026-06-17_18-21-58/checkpoint1.pt",
-        checkpoint=1
-    )
+    rosteals.train()
     
 
 
