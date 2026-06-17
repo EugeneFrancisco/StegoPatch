@@ -28,7 +28,7 @@ class ImageWatermarker(ABC):
         """
 
     @abstractmethod
-    def train(self, dataset: torch.Tensor) -> None:
+    def train(self) -> None:
         """
         This function should train anything that will be needed for watermarking later on.
         For example, if the watermarker uses an encoder decoder scheme for its steganogophy, then
