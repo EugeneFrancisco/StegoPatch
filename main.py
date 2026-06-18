@@ -2,7 +2,9 @@
 from pathlib import Path
 
 import torch
+import numpy as np
 from torch.utils.data import Subset
+from typing import Optional
 
 import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
@@ -28,6 +30,7 @@ NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
 TRAINING_SUBSET_SIZE = 8
 TRAINING_DATA_SIZE = 50_000
+LOG_TENSORBOARD = False
 
 
 def get_default_device() -> str:
@@ -72,6 +75,7 @@ def _build_rosteals(
         "training_data_size": TRAINING_DATA_SIZE,
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
+        "log_tensorboard": LOG_TENSORBOARD
     }
     return RoSteALS(configs)
 
@@ -83,7 +87,12 @@ def main(
     tensorboard_log_dir: str = "runs/rosteals",
 ):
     rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
-    rosteals.restart_training()
+    rosteals.load_model("models/rosteals_2026-06-18_16-39-39/checkpoint3.pt")
+    image = utils.load_random_image(DATA_DIR, IMAGE_SIZE)
+    message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
+    stego_image = rosteals.encode_image(image, message)
+
+    import ipdb; ipdb.set_trace()
 
 
 def restart(

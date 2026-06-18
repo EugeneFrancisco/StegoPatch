@@ -111,14 +111,23 @@ class RoSteALS(ImageWatermarker):
         # An update flag for when we can begin linearly increasing beta.
         self.update_flag: bool = False
 
-        # Where TensorBoard training logs are written. The run timestamp is appended
-        # so each run gets its own subdirectory rather than overwriting the last.
-        run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        base_log_dir = self.configs.get("tensorboard_log_dir", "runs/rosteals")
-        self.tensorboard_log_dir: str = f"{base_log_dir}_{run_timestamp}"
+        # Whether or not we will keep a tensorboard to track progress.
+        self.log_tensorboard: bool = self.configs["log_tensorboard"]
 
-        # The TensorBoard writer used to log losses during training.
-        self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
+        # The TensorBoard writer used to log losses during training. Only created
+        # when logging is enabled.
+        self.tensorboard = None
+        if self.log_tensorboard:
+            # Where TensorBoard training logs are written. The run timestamp is
+            # appended so each run gets its own subdirectory rather than overwriting
+            # the last.
+            run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            base_log_dir = self.configs.get("tensorboard_log_dir", "runs/rosteals")
+            self.tensorboard_log_dir: str = f"{base_log_dir}_{run_timestamp}"
+            self.tensorboard = SummaryWriter(log_dir=self.tensorboard_log_dir)
+            print("Logging to tensoboard.")
+        else:
+            print("Not logging to tensorboard.")
 
         # AdamW optimizes both trainable networks (the frozen autoencoder is excluded).
         # Kept as a member so optimizer state persists across train_until calls.
@@ -193,7 +202,7 @@ class RoSteALS(ImageWatermarker):
 
         # Track how large the offset is getting during training: if bit accuracy is
         # stuck, this tells us whether the encoder is actually learning to embed.
-        if self.message_encoder.training:
+        if self.log_tensorboard and self.message_encoder.training:
             delta_l2 = deltas.flatten(1).norm(dim=1).mean().item()
             self.tensorboard.add_scalar("delta_l2", delta_l2, self.step)
 
@@ -451,10 +460,11 @@ class RoSteALS(ImageWatermarker):
                 bit_accuracy = (predicted_bits == messages).float().mean().item()
                 recent_bit_accuracies.append(bit_accuracy)
 
-                self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
-                self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
-                self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
-                self.tensorboard.add_scalar("beta", self.beta, self.step)
+                if self.log_tensorboard:
+                    self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
+                    self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
+                    self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
+                    self.tensorboard.add_scalar("beta", self.beta, self.step)
                 self.step += 1
 
                 # Only stop once the rolling average over the last 10 batches
