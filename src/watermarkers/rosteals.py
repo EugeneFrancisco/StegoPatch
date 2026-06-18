@@ -2,6 +2,7 @@
 This file defines an image watermarker using RoSteALS method from Bui et al.
 """
 import os
+from collections import deque
 from datetime import datetime
 import numpy as np
 import torch
@@ -276,7 +277,10 @@ class RoSteALS(ImageWatermarker):
 
         # =================== Checkpoint 0 begins =================
 
-        baby_dataset = Subset(self.dataset, range(min(self.training_subset_size, len(self.dataset))))
+        baby_dataset = Subset(
+                            self.dataset,
+                            range(min(self.training_subset_size, len(self.dataset)))
+                            )
 
         # Train until bit accuracy is 0.9. The baby_dataset contains only a couple minibatches
         # worth of images so the max_epochs here is large because we want to do many passes over
@@ -391,6 +395,10 @@ class RoSteALS(ImageWatermarker):
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
+        # Rolling buffer of the previous 10 bit accuracies, used to smooth out
+        # noise before deciding whether the threshold has been reached.
+        recent_bit_accuracies = deque(maxlen=10)
+
         for _ in tqdm(range(max_epochs), desc="epochs"):
             for covers in loader:
                 covers = covers.to(self.device)
@@ -414,14 +422,19 @@ class RoSteALS(ImageWatermarker):
                 # Hard-decode the logits and measure the fraction of correct bits.
                 predicted_bits = (recovered_messages > 0).float()
                 bit_accuracy = (predicted_bits == messages).float().mean().item()
+                recent_bit_accuracies.append(bit_accuracy)
 
                 self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
                 self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
                 self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
                 self.step += 1
 
-                if bit_accuracy_threshold is not None and bit_accuracy >= bit_accuracy_threshold:
-                    return
+                # Only stop once the rolling average over the last 10 batches
+                # (once the buffer is full) beats the threshold.
+                if bit_accuracy_threshold is not None and len(recent_bit_accuracies) == recent_bit_accuracies.maxlen:
+                    rolling_average = sum(recent_bit_accuracies) / len(recent_bit_accuracies)
+                    if rolling_average >= bit_accuracy_threshold:
+                        return
                 self.update_beta()
 
             if save_every_epoch:
