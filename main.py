@@ -39,12 +39,13 @@ def get_default_device() -> str:
     return "cpu"
 
 
-def main(
-    data_path: Path = Path("data/train2017_numpy_256.npy"),
-    device: str | None = None,
-    models_dir: str = "models",
-    tensorboard_log_dir: str = "runs/rosteals",
-):
+def _build_rosteals(
+    data_path: Path,
+    device: str | None,
+    models_dir: str,
+    tensorboard_log_dir: str,
+) -> RoSteALS:
+    """Builds a RoSteALS with the standard training configs and dataset."""
     device = device or get_default_device()
     dataset = utils.NpyImageDataset(data_path)
     dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
@@ -72,9 +73,31 @@ def main(
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
     }
-    rosteals = RoSteALS(configs)
-    rosteals.train()
-    
+    return RoSteALS(configs)
+
+
+def main(
+    data_path: Path = Path("data/train2017_numpy_256.npy"),
+    device: str | None = None,
+    models_dir: str = "models",
+    tensorboard_log_dir: str = "runs/rosteals",
+):
+    rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
+    rosteals.restart_training()
+
+
+def restart(
+    save_path: str,
+    checkpoint: int,
+    data_path: Path = Path("data/train2017_numpy_256.npy"),
+    device: str | None = None,
+    models_dir: str = "models",
+    tensorboard_log_dir: str = "runs/rosteals",
+):
+    """Resumes training from the checkpoint .pt file at ``save_path``."""
+    rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
+    rosteals.restart_training(save_path, checkpoint)
+
 
 
 if __name__ == "__main__":

@@ -14,6 +14,12 @@ Run training (prints a public TensorBoard URL near the top of the logs):
 Fetch the trained weights afterwards (timestamp is printed at the end of the run):
 
     modal volume get rosteals-output models/rosteals_<timestamp>/final.pt ./final.pt
+
+Resume training from a saved checkpoint (upload it first, then resume):
+
+    modal volume put rosteals-output ./my_checkpoint.pt restart/checkpoint.pt
+    modal run modal_app.py::resume                  # uses restart/checkpoint.pt, checkpoint 1
+    modal run modal_app.py::resume --checkpoint 2
 """
 import subprocess
 from pathlib import Path
@@ -30,6 +36,14 @@ output_volume = modal.Volume.from_name("rosteals-output", create_if_missing=True
 DATA_DIR = "/data"
 OUTPUT_DIR = "/output"
 DATA_FILE = "train2017_numpy_256.npy"
+
+# Drop the checkpoint you want to resume from here, in the rosteals-output volume:
+#
+#     modal volume put rosteals-output ./my_checkpoint.pt restart/checkpoint.pt
+#
+# It then lives at this in-container path, which `modal run modal_app.py::restart`
+# loads from by default.
+RESTART_CHECKPOINT = f"{OUTPUT_DIR}/restart/checkpoint.pt"
 
 
 def _download_pretrained_weights():
@@ -94,6 +108,47 @@ def train():
             output_volume.commit()
 
 
+@app.function(
+    gpu="A10G",
+    volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
+    timeout=24 * 60 * 60,
+)
+def restart(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
+    import main as train_main
+
+    subprocess.Popen(
+        ["tensorboard", "--logdir", f"{OUTPUT_DIR}/runs",
+         "--host", "0.0.0.0", "--port", "6006"]
+    )
+
+    with modal.forward(6006) as tunnel:
+        print(f"\n>>> TensorBoard live at: {tunnel.url}\n", flush=True)
+        try:
+            train_main.restart(
+                save_path=save_path,
+                checkpoint=checkpoint,
+                data_path=Path(f"{DATA_DIR}/{DATA_FILE}"),
+                device="cuda",
+                models_dir=f"{OUTPUT_DIR}/models",
+                tensorboard_log_dir=f"{OUTPUT_DIR}/runs/rosteals",
+            )
+        finally:
+            output_volume.commit()
+
+
 @app.local_entrypoint()
 def run():
     train.remote()
+
+
+@app.local_entrypoint()
+def resume(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
+    """Resume training from a checkpoint .pt file living in the rosteals-output volume.
+
+    Usage (after uploading your checkpoint, see RESTART_CHECKPOINT above):
+
+        modal run modal_app.py::resume
+        modal run modal_app.py::resume --checkpoint 2
+        modal run modal_app.py::resume --save-path /output/models/rosteals_.../checkpoint2.pt
+    """
+    restart.remote(save_path=save_path, checkpoint=checkpoint)

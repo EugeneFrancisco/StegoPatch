@@ -329,9 +329,16 @@ class RoSteALS(ImageWatermarker):
 
         if checkpoint == 1:
             # =================== Checkpoint 1 begins =================
-            # Train until bit accuracy is 0.98.
-            self.train_until(self.dataset, bit_accuracy_threshold=0.98, save_every_epoch=True)
+            # Train until bit accuracy is 0.90 again. Update_flag is false so that
+            # we prioritize recovery still.
+            self.update_flag = False
+            self.train_until(self.dataset, bit_accuracy_threshold=0.80, save_every_epoch=True)
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
+
+            # Start incrementing beta.
+            self.update_flag = True
+            self.train_until(self.dataset, bit_accuracy_threshold=0.95, save_every_epoch=True)
+            self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
         # =================== Checkpoint 2 begins =================
         # TODO, insert noise model
