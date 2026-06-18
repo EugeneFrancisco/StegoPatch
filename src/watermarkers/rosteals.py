@@ -359,8 +359,20 @@ class RoSteALS(ImageWatermarker):
                             )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
-        # =================== Checkpoint 3 begins =================
-        self.beta = self.beta_max
+        if checkpoint in [1, 2, 3]:
+            # =================== Checkpoint 3 begins =================
+            # Train on all 100,000 examples now until 0.98 is reached.
+            self.beta = self.beta_max
+            self.train_until(
+                            self.dataset,
+                            bit_accuracy_threshold=0.98,
+                            save_every_epoch=True,
+                            progress_bar="step"
+                            )
+            self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint4.pt")
+
+        # ====================== Checkpoint 4 begins ==============
+        # Begin training with noise
         # TODO, insert noise model
         self.train_until(self.dataset, max_epochs=2, progress_bar="step")
         self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")

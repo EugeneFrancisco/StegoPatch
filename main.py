@@ -3,8 +3,8 @@ from pathlib import Path
 
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 from torch.utils.data import Subset
-from typing import Optional
 
 import src.utils as utils
 from src.watermarkers.rosteals import RoSteALS
@@ -29,8 +29,8 @@ NUM_EPOCHS_FOR_LARGE_BATCH = 8
 NUM_EPOCHS_FOR_SMALL_BATCH = 200_000
 LEARNING_RATE = 2e-5
 TRAINING_SUBSET_SIZE = 8
-TRAINING_DATA_SIZE = 50_000
-LOG_TENSORBOARD = False
+TRAINING_DATA_SIZE = 100_000
+LOG_TENSORBOARD = True
 
 
 def get_default_device() -> str:
@@ -94,8 +94,6 @@ def main(
     recovered_message = rosteals.decode_image(stego_image)
 
     bit_accuracy = np.sum(recovered_message == message)/MESSAGE_LENGTH
-
-    import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 4))
     axes[0].imshow(image)
