@@ -360,6 +360,7 @@ class RoSteALS(ImageWatermarker):
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
         # =================== Checkpoint 3 begins =================
+        self.beta = self.beta_max
         # TODO, insert noise model
         self.train_until(self.dataset, max_epochs=2, progress_bar="step")
         self.save_model(f"{models_dir}/rosteals_{start_time}/final.pt")
