@@ -1,11 +1,13 @@
 diffusers==0.38.0
-imagenet-c==0.0.3
 ipdb==0.13.13
 lpips==0.1.4
 matplotlib==3.11.0
 modal==1.5.0
 numpy==2.4.6
+opencv-python-headless==4.13.0
 pillow==12.2.0
+scikit-image==0.26.0
+scipy==1.17.1
 tensorboard==2.20.0
 torch==2.12.0
 torchvision==0.27.0

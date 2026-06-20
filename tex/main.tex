@@ -1,0 +1,58 @@
+\documentclass[twocolumn]{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{newStyle}
+\usepackage{titling}
+
+\setlength{\droptitle}{-4em}
+
+\title{RoSteALS Implementation and Robustness}
+\author{Eugene Francisco}
+\date{June 2026}
+
+\begin{document}
+
+\maketitle
+\section*{Overview}
+During a one week break between Stanford's Spring and Summer quarters, I reimplemented Bui et al.'s\footnote{https://arxiv.org/pdf/2304.03400} RoSteALS technique for image watermarking.
+
+As an overview of the technique, RoSteALS embeds watermarks into a cover image by using an image autoencoder and embedding information within the cover image's latent representation. More formally, let $E, G$ be an autoencoder. For a high fidelity image $c\in \R^{H\times W\times C}$, let $E(c) = z\in \R^{H'\times W'\times C}$ be $c$'s latent representation. For a latent variable $z\in \in \R^{H'\times W'\times C}$, let $G(z)\in \R^{H\times W\times C}$ be the generated image from the auto encoder.
+
+How does RoSteALS watermark images? Let $c\in \R^{H\times W\times C}$ be an image we intend to watermark and $z = E(c)$ be its encoding. Let $s\in \R^\ell$ be a secret message we intend to embed in $c$. RoSteALS learns two neural networks:
+\begin{enumerate}[label=(\roman*)]
+\item First, it 	learns a message encoder $F_\theta$ which outputs $\delta = F_\theta(s) \in \R^{H' \times W'\times C}$. The watermarked latent is then $z + \delta$ and the watermarked image is $\tilde c = G(z + \delta)$.
+\item Second, it leans a secret decoder $D_\varphi$ which outputs $\tilde s = D_\varphi(\tilde c)$, a reconstruction of the original message.
+\end{enumerate}
+The neural networks are parametrized by learnable parameters $\theta$ and $\varphi$. Note that the autoencoder $E, G$ is not learned and is fixed in advance. They are trained using two objectives:
+\begin{enumerate}[label=(\alph*)]
+\item $\L_{\mathrm{quality}} = \L_{\mathrm{LPIPS}}(\tilde c, c) + \alpha \Vert \gamma(\tilde c) - \gamma{c}\Vert_2^2$, where $\L_{\mathrm{LPIPS}}$ is the LPIPS image reconstruction loss and $\gamma$ is the mapping function from RGB to YUV.
+\item $\L_{\mathrm{recovery}} = \mathrm{BCE}(s, \tilde s)$ where $\mathrm{BCE}$ is the binary cross entropy between $s$ and $\tilde s$.
+\end{enumerate}
+The training loss is then
+\begin{align*}
+	\L = \beta\L_{\mathrm{quality}} + \L_{\text{recovery}}.
+\end{align*}
+
+\section*{Implementation Details}
+The \tc{purple}{purple} text corresponds to implementation details from \tc{purple}{Bui et al}. The \tc{olive}{olive} text corresponds to my own specific implementation details. \tc{purple}{The VQGAN vq-f4 autoencoder is used; this uses a latent dimension of $H' = H/4$ and $W' = W/4$. I fixed hyperparameters $\alpha = 1.5$ and $\beta$ is scaled dynamically (see below). I use the AdamW optimizer with learning rate $2\cdot 10^{-5}$.} \tc{olive}{I trained on the COCO training dataset from 2017 with $100{,}000$ images of size $256\times 256$ and a message length of $\ell = 50$.} \tc{purple}{I used curriculum learning to train with the following training schedule:}
+\begin{enumerate}[label=(\alph*)]
+\item \textit{Warmup phase 1}: \tc{purple}{ I fix $\beta = 0.1$ for the entirety of the phase and train $F_\theta$ and $D_\varphi$ until the bit accuracy reaches $0.9$.} \tc{olive}{Training is done with a fixed subset of $8$ randomly selected images from the total training set and a minibatch size of $4$.}\item \textit{Warmup phase 2:} \tc{olive}{I reveal an additional $50{,}000$ images. $\beta$ continues to be fixed at $0.1$. Batch size is bumped to $8$. This phase ends once bit accuracy reaches $0.8$.\footnote{In my experiments, the transition from \textit{warmup phase 1} to \textit{warmup phase 2} is typically followed by a drastic drop in bit accuracy, hence the lowered threshold.}}
+\item \textit{Exposure phase 1: }\tc{purple}{Over the course of $5{,}000$\footnote{From my experiments, $5{,}000$ corresponded roughly to a $10$ percentage point increase in bit accuracy} training iterations,} \tc{olive}{I linearly increase $\beta$ from $0.1$ to $10$.}
+\item \textit{Exposure phase 2:} \tc{olive}{I reveal the full $100{,}000$ image training set to the models. This phase ends once bit accuracy reaches $0.98$.}
+\item \textit{Noising phase:} \tc{purple}{\TODO blah blah}
+\end{enumerate}
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+\section*{}
+
+\end{document}

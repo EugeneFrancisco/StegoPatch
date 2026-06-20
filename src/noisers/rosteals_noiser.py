@@ -2,7 +2,7 @@
 This file defines an inheritor of the noiser to mimic the noising scheme from Bui et al.
 """
 from typing import Union, Callable
-from imagenet_c import corrupt
+from src.noisers.imagenet_corruptions import corrupt, DEFAULT_CORRUPTION_IDS
 from src.noisers.noiser import Noiser
 from PIL import Image
 import torch
@@ -18,8 +18,9 @@ class RoSteALSNoiser(Noiser):
         "differentiable": DIFFERENTIABLE,
         "imagenet": IMAGENET,
     }
-    # RoSteALS training corruption ids (excludes glass/motion/zoom blur + snow).
-    _DEFAULT_CORRUPTIONS = [0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    # RoSteALS training corruption ids, minus the ImageMagick-backed ones
+    # (glass/motion/zoom blur, snow) and frost (needs bundled assets).
+    _DEFAULT_CORRUPTIONS = DEFAULT_CORRUPTION_IDS
     # standard luma weights, used for the saturation blend
     _LUMA = (0.299, 0.587, 0.114)
 
@@ -115,7 +116,6 @@ class RoSteALSNoiser(Noiser):
             severity: int
         ) -> np.ndarray:
         """Corrupt one HxWxC uint8 RGB image; resize to 224 like RoSteALS then back."""
-
         h, w = img_uint8.shape[:2]
         pil = Image.fromarray(img_uint8).resize((224, 224), Image.Resampling.BILINEAR)
         out = corrupt(np.asarray(pil), severity=severity, corruption_number=corruption_id)

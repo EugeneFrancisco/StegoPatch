@@ -66,11 +66,16 @@ image = (
         "transformers",
         "lpips",
         "numpy",
+        "scipy",
         "pillow",
         "tqdm",
         "tensorboard",
         "accelerate",
-        "matplotlib"
+        "matplotlib",
+        # ImageNet-C corruptions are reimplemented in src/noisers/imagenet_corruptions.py
+        # on top of these, so no ImageMagick / imagenet_c system deps are needed.
+        "scikit-image",
+        "opencv-python-headless",
     )
     .run_function(_download_pretrained_weights)
     # Ship the local source last so editing it doesn't bust the build cache above.
