@@ -91,7 +91,7 @@ def build_configs(
         "num_epochs": NUM_EPOCHS_FOR_LARGE_BATCH,
         "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "batch_size": BATCH_SIZE,
-        "training_subset_sizes": {
+        "training_data_sizes": {
             0: FIRST_EXPOSURE_SIZE,
             1: SECOND_EXPOSURE_SIZE,
             2: TRAINING_DATA_SIZE
@@ -129,27 +129,31 @@ def main(
     tensorboard_log_dir: str,
 ):
     rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
-    rosteals.load_model("models/rosteals_2026-06-18_16-39-39/checkpoint3.pt")
-    image = utils.load_random_image(DATA_DIR, IMAGE_SIZE)
-    message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    stego_image = rosteals.encode_image(image, message)
-    recovered_message = rosteals.decode_image(stego_image)
+    rosteals.restart_training(
+        save_path="results/experiment_1/models/rosteals_2026-06-18_19-27-00/checkpoint4.pt",
+        checkpoint=4
+        )
 
-    bit_accuracy = np.sum(recovered_message == message)/MESSAGE_LENGTH
+    # image = utils.load_random_image(DATA_DIR, IMAGE_SIZE)
+    # message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
+    # stego_image = rosteals.encode_image(image, message)
+    # recovered_message = rosteals.decode_image(stego_image)
 
-    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-    axes[0].imshow(image)
-    axes[0].set_title("original")
-    axes[1].imshow(stego_image)
-    axes[1].set_title(f"stego (bit accuracy {bit_accuracy:.2f})")
-    for ax in axes:
-        ax.axis("off")
-    fig.tight_layout()
+    # bit_accuracy = np.sum(recovered_message == message)/MESSAGE_LENGTH
 
-    out_path = Path("results/roundtrip.png")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path)
-    plt.close(fig)
+    # fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    # axes[0].imshow(image)
+    # axes[0].set_title("original")
+    # axes[1].imshow(stego_image)
+    # axes[1].set_title(f"stego (bit accuracy {bit_accuracy:.2f})")
+    # for ax in axes:
+    #     ax.axis("off")
+    # fig.tight_layout()
+
+    # out_path = Path("results/roundtrip.png")
+    # out_path.parent.mkdir(parents=True, exist_ok=True)
+    # fig.savefig(out_path)
+    # plt.close(fig)
 
 
 def restart(

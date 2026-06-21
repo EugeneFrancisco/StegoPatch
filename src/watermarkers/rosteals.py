@@ -341,7 +341,9 @@ class RoSteALS(ImageWatermarker):
         self.train_until(
                         second_dataset,
                         bit_accuracy_threshold=0.95,
-                        save_every_epoch=True
+                        save_every_epoch=True,
+                        start_time=start_time,
+                        checkpoint=3
                         )
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
@@ -350,7 +352,9 @@ class RoSteALS(ImageWatermarker):
         self.train_until(
                         self.dataset,
                         bit_accuracy_threshold=0.98,
-                        save_every_epoch=True
+                        save_every_epoch=True,
+                        start_time=start_time,
+                        checkpoint=4
                         )
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint4.pt")
 
@@ -393,8 +397,7 @@ class RoSteALS(ImageWatermarker):
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.80,
-                            save_every_epoch=True,
-                            progress_bar="step"
+                            progress_bar="step",
                             )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint2.pt")
 
@@ -406,8 +409,7 @@ class RoSteALS(ImageWatermarker):
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.95,
-                            save_every_epoch=True,
-                            progress_bar="step"
+                            progress_bar="step",
                             )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint3.pt")
 
@@ -419,7 +421,6 @@ class RoSteALS(ImageWatermarker):
             self.train_until(
                             self.dataset,
                             bit_accuracy_threshold=0.98,
-                            save_every_epoch=True,
                             progress_bar="step"
                             )
             self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint4.pt")
@@ -430,7 +431,14 @@ class RoSteALS(ImageWatermarker):
         self.beta = self.beta_max
 
         self.begin_noising = True
-        self.train_until(self.dataset, max_epochs=5, progress_bar="step")
+        self.train_until(
+                        self.dataset,
+                        max_epochs=5,
+                        progress_bar="step",
+                        save_every_epoch=True,
+                        start_time=start_time,
+                        checkpoint=5
+                        )
         self.save_model(f"{models_dir}/rosteals_{start_time}/checkpoint5.pt")
 
 
@@ -481,12 +489,20 @@ class RoSteALS(ImageWatermarker):
             max_epochs=None,
             save_every_epoch=False,
             progress_bar="epoch",
+            start_time=None,
+            checkpoint=None,
         ) -> None:
         """
         Trains the message encoder and secret decoder on the passed in dataset
         until theshold is reached or max_epochs is reached.
 
         If ``save_every_epoch`` is True, the model is saved after each epoch finishes.
+        When ``start_time`` is provided, those per-epoch checkpoints are written next
+        to the ``train``/``restart_training`` checkpoints (``{models_dir}/rosteals_
+        {start_time}/checkpoint{checkpoint}_epoch_{n}.pt``) so they share the same run
+        directory and are grouped by the checkpoint phase that produced them;
+        otherwise the default ``save_model`` path is used. ``checkpoint`` is the number
+        of the named checkpoint this training phase culminates in.
 
         ``progress_bar`` controls where the tqdm bar lives: "epoch" (default) wraps
         the outer epoch loop, "step" wraps the inner per-batch loop within each epoch.
@@ -503,7 +519,7 @@ class RoSteALS(ImageWatermarker):
         if progress_bar == "epoch":
             epochs = tqdm(epochs, desc="epochs")
 
-        for _ in epochs:
+        for epoch in epochs:
             steps = tqdm(loader, desc="steps") if progress_bar == "step" else loader
             for covers in steps:
                 covers = covers.to(self.device)
@@ -559,7 +575,18 @@ class RoSteALS(ImageWatermarker):
                 self.update_beta()
 
             if save_every_epoch:
-                self.save_model()
+                if start_time is not None:
+                    # Land per-epoch checkpoints in the same run directory the
+                    # train/restart_training named checkpoints use, prefixed with
+                    # the checkpoint phase and tagged with the epoch they
+                    # correspond to (1-indexed) so they don't collide across phases.
+                    models_dir = self.configs.get("models_dir", "models")
+                    self.save_model(
+                        f"{models_dir}/rosteals_{start_time}/"
+                        f"checkpoint{checkpoint}_epoch_{epoch + 1}.pt"
+                    )
+                else:
+                    self.save_model()
 
     def update_beta(self):
         """
