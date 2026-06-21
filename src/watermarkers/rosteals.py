@@ -367,13 +367,14 @@ class RoSteALS(ImageWatermarker):
         Restarts training from the passed in save_path and starting from the checkpoint.
         Args:
             save_path: a path to a .pt file that saves the training information.
-            checkpoint: an int that is either 1, 2, or 3. If it is 1, this means we restart
-            training from the point that we reveal the model to the full training set (t1)
+            checkpoint: an int that is either 1, 2, 3, or 4. If it is 1, this means we restart
+            training from the point that we reveal the model to the half the training set (t1)
             If it is 2, then we start training from the point that we begin incrementing beta,
             meaning the quality loss gets increasingly weighted. If it is 3, then we begin training
-            where we start adding noise.
+            where we reveal the model to the full training set. If it is 4, then we begin adding
+            noise between watermark insertion and message decoding.
         """
-        assert checkpoint in (1, 2, 3)
+        assert checkpoint in (1, 2, 3, 4)
 
         # Restore weights, optimizer state, and the beta schedule progress.
         self.load_model(save_path)
