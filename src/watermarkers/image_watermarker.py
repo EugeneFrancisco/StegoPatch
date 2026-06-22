@@ -20,6 +20,7 @@ class ImageWatermarker(ABC):
         message, these should be included in the configs dictionary in the constructor.
         """
 
+    @abstractmethod
     def decode_image(self, stego_image: np.ndarray) -> np.ndarray:
         """
         Given an image, returns the bit array that the image decodes to. I.e., the
@@ -33,4 +34,12 @@ class ImageWatermarker(ABC):
         For example, if the watermarker uses an encoder decoder scheme for its steganogophy, then
         the encoder and decoder would be trained here. Any hyperparameters needed should be
         included in the configs dictionary passed in the constructor.
+        """
+
+    @abstractmethod
+    def validate(self) -> dict:
+        """
+        This function should return the quality loss and bit recovery accuracy averaged over a
+        validation set. The validation set should be passed in the constructor as a value in
+        configs.
         """

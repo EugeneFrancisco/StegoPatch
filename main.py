@@ -128,32 +128,10 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
-    rosteals.restart_training(
-        save_path="results/experiment_1/models/rosteals_2026-06-18_19-27-00/checkpoint4.pt",
-        checkpoint=4
-        )
+    utils.precompute_image_tensors(
+        data_dir = 
+    )
 
-    # image = utils.load_random_image(DATA_DIR, IMAGE_SIZE)
-    # message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    # stego_image = rosteals.encode_image(image, message)
-    # recovered_message = rosteals.decode_image(stego_image)
-
-    # bit_accuracy = np.sum(recovered_message == message)/MESSAGE_LENGTH
-
-    # fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-    # axes[0].imshow(image)
-    # axes[0].set_title("original")
-    # axes[1].imshow(stego_image)
-    # axes[1].set_title(f"stego (bit accuracy {bit_accuracy:.2f})")
-    # for ax in axes:
-    #     ax.axis("off")
-    # fig.tight_layout()
-
-    # out_path = Path("results/roundtrip.png")
-    # out_path.parent.mkdir(parents=True, exist_ok=True)
-    # fig.savefig(out_path)
-    # plt.close(fig)
 
 
 def restart(

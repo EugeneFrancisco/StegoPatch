@@ -153,6 +153,9 @@ class RoSteALS(ImageWatermarker):
         # Global training step, used for TensorBoard logging across train_until calls.
         self.step = 0
 
+        # ====== validation material =========
+        self.validation_set = self.configs.get("validation_set", None)
+
     def setup_message_encoder(self) -> nn.Module:
         """
         Sets up the neural network that turns messages into latent space representations.
@@ -639,3 +642,43 @@ class RoSteALS(ImageWatermarker):
         """
         loss_recovery = utils.bce_loss(recovered_messages, messages)
         return loss_recovery
+
+    def validate(self) -> dict:
+        assert self.validation_set is not None
+        assert not self.log_tensorboard
+
+        self.message_encoder.eval()
+        self.secret_decoder.eval()
+
+        results = {
+            "quality_loss": 0,
+            "identity_bit_accuracy": 0,
+            "noised_bit_accuracy": 0,
+        }
+
+        loader = DataLoader(self.validation_set, self.batch_size, shuffle=False)
+        num_steps = len(loader)
+
+        with torch.no_grad():
+            for covers in tqdm(loader, desc="steps"):
+                covers = covers.to(self.device)
+                messages = torch.randint(
+                    0, 2, (covers.shape[0], self.message_length), device=self.device
+                ).float()
+                stego_images = self.encode_batch(covers, messages)
+                results["quality_loss"] += self.get_quality_loss(covers, stego_images)
+                recovered_messages = self.decode_batch(stego_images)
+                predicted_bits = (recovered_messages > 0).float()
+                results[
+                    "identity_bit_accuracy"
+                ] += (predicted_bits == messages).float().mean().item()
+
+                noised_images = self.noiser.apply_noise(stego_images)
+                recovered_messages = self.decode_batch(noised_images)
+                predicted_bits = (recovered_messages > 0).float()
+                results["noised_bit_accuracy"] += (predicted_bits == messages).float().mean().item()
+
+        for key in results:
+            results[key] /= num_steps
+
+        return results
