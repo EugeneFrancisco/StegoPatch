@@ -1,6 +1,8 @@
 """
 This file defines the StegoPatch Watermarking class.
 """
+import os
+from collections import deque
 from datetime import datetime
 
 import numpy as np
@@ -9,7 +11,9 @@ import torch.nn as nn
 from torch.utils.data import Dataset, Subset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import resnet50, ResNet50_Weights
+from tqdm import tqdm
 
+import src.utils as utils
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.autoencoder import AutoEncoder
 from src.autoencoders.vqgan import VQGAN
@@ -60,8 +64,18 @@ class StegoPatch(ImageWatermarker):
         # and decoding messages.
         self.noiser: Noiser = self.configs["noiser"]
 
-        # A flag for when to begin applying noise during training.
+        # A flag for when to begin applying the full noise blend during training.
         self.begin_noising: bool = False
+
+        # A flag for when to begin applying cropping noise. Unlike begin_noising,
+        # cropping is turned on from the very first checkpoint: robustness to
+        # cropping is the whole point of StegoPatch, so the model trains against
+        # crops before any other corruption is introduced.
+        self.begin_cropping: bool = False
+
+        # Probability that a batch is cropped while begin_cropping is on (and the
+        # full noise blend is still off).
+        self.crop_probability: float = 0.5
 
         # ========== Dataset Material =============
 
@@ -83,6 +97,17 @@ class StegoPatch(ImageWatermarker):
 
         # The batch size.
         self.batch_size: int = self.configs["batch_size"]
+
+        # The number of epochs to run before stopping a checkpoint. Typically we won't run this
+        # many epochs because the bit accuracy threshold should be crossed before this happens.
+        self.num_epochs = 20
+
+        # The number of epochs to run on the first (tiny) exposure set. That set is
+        # only a minibatch or two, so a single "epoch" is just a step or two; this is
+        # large to allow many passes over those few images before the threshold hits.
+        self.num_epochs_for_small_batch: int = self.configs.get(
+            "num_epochs_for_small_batch", 1000
+        )
 
         # Controls the weight of the MSE loss for the quality loss objective.
         self.alpha: float = self.configs["alpha"]
@@ -128,6 +153,10 @@ class StegoPatch(ImageWatermarker):
 
         # Global training step, used for TensorBoard logging across train_until calls.
         self.step = 0
+
+        # The directory where model checkpoints are written (a Modal Volume path
+        # when run remotely). Required: fail loudly if it isn't configured.
+        self.models_dir: str = self.configs["models_dir"]
 
         # ====== validation material =========
         self.test_set = self.configs.get("test_set", None)
@@ -293,22 +322,300 @@ class StegoPatch(ImageWatermarker):
         """
         return self.secret_decoder(stego_images)
 
-    def train(self):
-        # ============ Checkpoint 0 =============
-        # Train on only one minibatch of images until bit accuracy crosses 0.9.
+    def train(self) -> None:
+        """
+        Trains the message encoder and secret decoder via curriculum learning,
+        closely mirroring :meth:`RoSteALS.train`. The one structural difference is
+        that cropping robustness is trained from the very first checkpoint (the
+        whole purpose of StegoPatch), while every other noise type is withheld
+        until the final checkpoint. The frozen image autoencoder is used as-is;
+        only the message encoder and secret decoder are optimized.
+        """
+        assert len(self.dataset) == self.training_data_size
 
-        # ============ Checkpoint 1 =============
-        # Reveal the model to much more of the data and train until the bit accuracy crosses 0.8
+        self.secret_decoder.train()
+        self.message_encoder.train()
 
-        # ============ Checkpoint 2 =============
-        # Begin incrementing beta from beta_min to beta_max until bit accuracy reaches 0.95.
+        # Timestamp of when training started, used to name the saved weights.
+        start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        # ============ Checkpoint 3 =============
-        # Expose the full training set until bit accuracy reaches 0.98
+        # Crop (with probability self.crop_probability) from checkpoint 0 onward;
+        # all other noise types stay off until checkpoint 4.
+        self.begin_cropping = True
 
-        # ============ Checkpoint 4 =============
-        # Add other forms of noise.
-        pass
+        # =================== Checkpoint 0 begins =================
+        # Train one or two mini batches of data until the 0.9 bit accuracy threshold is reached.
+        # The baby_dataset contains only a couple minibatches worth of images so the max_epochs
+        # here is large because we want to do many passes over those images.
+        baby_dataset = Subset(
+            self.dataset,
+            range(min(self.first_exposure_set_size, len(self.dataset)))
+        )
+        self.train_until(
+            baby_dataset,
+            bit_accuracy_threshold=0.9,
+            max_epochs=self.num_epochs_for_small_batch,
+            save_every_epoch=True,
+            start_time=start_time,
+            checkpoint=0
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint1.pt")
+
+        # =================== Checkpoint 1 begins =================
+        # Expose the model to a much larger portion of the training data (around half of total)
+        # and train until bit accuracy crosses 0.8.
+        second_dataset = Subset(
+            self.dataset,
+            range(min(self.second_exposure_set_size, len(self.dataset)))
+        )
+        self.train_until(
+            second_dataset,
+            bit_accuracy_threshold=0.8,
+            max_epochs=self.num_epochs,
+            save_every_epoch=True,
+            start_time=start_time,
+            checkpoint=1
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint2.pt")
+
+        # =================== Checkpoint 2 begins =================
+        # Train on the same dataset but begin ramping beta from beta_min to beta_max, weighting
+        # quality more heavily. Train until bit accuracy reaches 0.95.
+        self.update_flag = True
+        self.train_until(
+            second_dataset,
+            bit_accuracy_threshold=0.95,
+            save_every_epoch=True,
+            start_time=start_time,
+            checkpoint=2
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint3.pt")
+
+        # =================== Checkpoint 3 begins =================
+        # Expose the model to the full training set and train until bit accuracy reaches 0.98.
+        self.train_until(
+            self.dataset,
+            bit_accuracy_threshold=0.98,
+            save_every_epoch=True,
+            start_time=start_time,
+            checkpoint=3,
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint4.pt")
+
+        # =================== Checkpoint 4 begins =================
+        # Turn on the full noise blend (differentiable + imagenet-c corruptions, alongside
+        # cropping) to finish training for robustness.
+        self.begin_noising = True
+        self.train_until(
+            self.dataset,
+            max_epochs=5,
+            save_every_epoch=True,
+            start_time=start_time, 
+            checkpoint=4
+        )
+        self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
+
+    def save_model(self, path: str) -> None:
+        """
+        Saves the trainable network weights (message encoder and secret decoder)
+        to ``path``. The frozen autoencoder is not saved.
+        """
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(
+            {
+                "message_encoder": self.message_encoder.state_dict(),
+                "secret_decoder": self.secret_decoder.state_dict(),
+                # Optimizer state (AdamW moments + step counts) so training can
+                # resume without restarting the optimizer cold.
+                "optimizer": self.optimizer.state_dict(),
+                # Training progress that mutates across train_until calls and is
+                # needed to pick the beta schedule back up exactly where we left off.
+                "beta": self.beta,
+                "update_flag": self.update_flag,
+                "step": self.step,
+            },
+            path,
+        )
+
+    def load_model(self, path: str) -> None:
+        """
+        Loads previously saved message encoder and secret decoder weights from
+        ``path`` into this instance.
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        self.message_encoder.load_state_dict(checkpoint["message_encoder"])
+        self.secret_decoder.load_state_dict(checkpoint["secret_decoder"])
+
+        # Restore training state if present, so we can resume rather than just
+        # run inference. Guarded with .get so older weight-only checkpoints
+        # still load.
+        if "optimizer" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.beta = checkpoint.get("beta", self.beta)
+        self.update_flag = checkpoint.get("update_flag", self.update_flag)
+        self.step = checkpoint.get("step", self.step)
+
+    def train_until(
+            self,
+            dataset: Dataset,
+            bit_accuracy_threshold=None,
+            max_epochs=None,
+            save_every_epoch=False,
+            progress_bar="epoch",
+            start_time=None,
+            checkpoint=None,
+        ) -> None:
+        """
+        Trains the message encoder and secret decoder on the passed in dataset
+        until the threshold is reached or max_epochs is reached.
+
+        If ``save_every_epoch`` is True, the model is saved after each epoch finishes.
+        When ``start_time`` is provided, those per-epoch checkpoints are written next
+        to the ``train`` checkpoints (``{models_dir}/stegopatch_{start_time}/
+        checkpoint{checkpoint}_epoch_{n}.pt``) so they share the same run directory and
+        are grouped by the checkpoint phase that produced them; otherwise the default
+        ``save_model`` path is used. ``checkpoint`` is the number of the named checkpoint
+        this training phase culminates in.
+
+        ``progress_bar`` controls where the tqdm bar lives: "epoch" (default) wraps
+        the outer epoch loop, "step" wraps the inner per-batch loop within each epoch.
+        """
+        assert progress_bar in ("epoch", "step")
+        max_epochs = max_epochs if max_epochs is not None else self.num_epochs
+        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
+
+        # Rolling buffer of the previous 10 bit accuracies, used to smooth out
+        # noise before deciding whether the threshold has been reached.
+        recent_bit_accuracies = deque(maxlen=10)
+
+        epochs = range(max_epochs)
+        if progress_bar == "epoch":
+            epochs = tqdm(epochs, desc="epochs")
+
+        for epoch in epochs:
+            steps = tqdm(loader, desc="steps") if progress_bar == "step" else loader
+            for covers in steps:
+                covers = covers.to(self.device)
+
+                # Random {0, 1} messages, one per cover in the batch.
+                messages = torch.randint(
+                    0, 2, (covers.shape[0], self.message_length), device=self.device
+                ).float()
+
+                stego_images = self.encode_batch(covers, messages)
+
+                # Quality is always measured against the clean watermarked image:
+                # the noise layer is a channel corruption used to train decoder
+                # robustness, not something the encoder should compensate for.
+                loss_quality = self.get_quality_loss(covers, stego_images)
+
+                # Apply noise only to what the decoder sees, so robustness training
+                # does not leak into the quality loss. The full noise blend (once
+                # begin_noising is set) supersedes the cropping-only phase; before
+                # that, crop with probability self.crop_probability and otherwise
+                # leave the batch untouched.
+                decoder_input = stego_images
+                if self.begin_noising:
+                    decoder_input = self.noiser.apply_noise(stego_images)
+                elif self.begin_cropping and np.random.rand() < self.crop_probability:
+                    decoder_input = self.noiser.get_noise_function("crop")(stego_images)
+
+                recovered_messages = self.decode_batch(decoder_input)
+
+                loss_recovery = self.get_recovery_loss(messages, recovered_messages)
+                loss = loss_recovery + self.beta * loss_quality
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                # Hard-decode the logits and measure the fraction of correct bits.
+                predicted_bits = (recovered_messages > 0).float()
+                bit_accuracy = (predicted_bits == messages).float().mean().item()
+                recent_bit_accuracies.append(bit_accuracy)
+
+                if self.log_tensorboard:
+                    self.tensorboard.add_scalar("loss/recovery", loss_recovery.item(), self.step)
+                    self.tensorboard.add_scalar("loss/quality", loss_quality.item(), self.step)
+                    self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
+                    self.tensorboard.add_scalar("beta", self.beta, self.step)
+                self.step += 1
+
+                # Only stop once the rolling average over the last 10 batches
+                # (once the buffer is full) beats the threshold.
+                if (
+                    bit_accuracy_threshold is not None
+                    and len(recent_bit_accuracies) == recent_bit_accuracies.maxlen
+                ):
+                    rolling_average = sum(recent_bit_accuracies) / len(recent_bit_accuracies)
+                    if rolling_average >= bit_accuracy_threshold:
+                        return
+                self.update_beta()
+
+            if save_every_epoch:
+                # Per-epoch checkpoints must be explicitly located: require a
+                # start_time (and checkpoint) so we always know where they land.
+                assert start_time is not None and checkpoint is not None
+
+                # Land per-epoch checkpoints in the same run directory the
+                # train named checkpoints use, prefixed with the checkpoint
+                # phase and tagged with the epoch they correspond to
+                # (1-indexed) so they don't collide across phases.
+                self.save_model(
+                    f"{self.models_dir}/stegopatch_{start_time}/"
+                    f"checkpoint{checkpoint}_epoch_{epoch + 1}.pt"
+                )
+
+    def update_beta(self):
+        """
+        Linearly increases beta once the flag is set and until beta reaches
+        the max beta.
+        """
+        if not self.update_flag or self.beta >= self.beta_max:
+            return
+        self.beta += self.beta_delta
+
+    def get_quality_loss(
+            self,
+            covers: torch.Tensor,
+            stego_images: torch.Tensor,
+        ) -> torch.Tensor:
+        """
+        Return the quality loss on the passed in data.
+        Args:
+            covers: a (B, C, H, W) tensor of images that were used to create watermarks.
+            stego_images: a (B, C, H, W) tensor of images that have been watermarked with the passed
+                in messages.
+        Returns:
+            The torch tensor with the quality loss.
+        """
+        # Calculate the MSE loss between the covers and the stego_images.
+        covers_yuv = utils.rgb_to_yuv(covers)
+        stego_images_yuv = utils.rgb_to_yuv(stego_images)
+        loss_mse = nn.functional.mse_loss(stego_images_yuv, covers_yuv)
+
+        # Calculate the LPIPS loss between the covers and the stego images.
+        loss_lpips = utils.lpips_loss(covers, stego_images)
+
+        loss_quality = loss_lpips + self.alpha * loss_mse
+        return loss_quality
+
+    def get_recovery_loss(
+            self,
+            messages: torch.Tensor,
+            recovered_messages: torch.Tensor
+        ) -> torch.Tensor:
+        """
+        Return the recovery loss on the passed in data.
+        Args:
+            messages: a (B, message_length) tensor of messages that were encoded.
+            recovered_messages: a (B, message_length) tensor of recovered messages from the
+                watermarked images.
+        Returns:
+            The torch tensor with the recovery loss.
+        """
+        loss_recovery = utils.bce_loss(recovered_messages, messages)
+        return loss_recovery
 
     def validate(self):
         pass
