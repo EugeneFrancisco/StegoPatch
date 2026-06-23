@@ -294,6 +294,20 @@ class StegoPatch(ImageWatermarker):
         return self.secret_decoder(stego_images)
 
     def train(self):
+        # ============ Checkpoint 0 =============
+        # Train on only one minibatch of images until bit accuracy crosses 0.9.
+
+        # ============ Checkpoint 1 =============
+        # Reveal the model to much more of the data and train until the bit accuracy crosses 0.8
+
+        # ============ Checkpoint 2 =============
+        # Begin incrementing beta from beta_min to beta_max until bit accuracy reaches 0.95.
+
+        # ============ Checkpoint 3 =============
+        # Expose the full training set until bit accuracy reaches 0.98
+
+        # ============ Checkpoint 4 =============
+        # Add other forms of noise.
         pass
 
     def validate(self):
