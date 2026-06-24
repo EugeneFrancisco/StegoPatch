@@ -48,7 +48,7 @@ H_LITTLE = PATCH_SIZE / 8
 W_LITTLE = PATCH_SIZE / 8
 C_LITTLE = 3
 ALPHA = 1.5
-BETA_MIN = 0.1
+BETA_MIN = 0.08
 BETA_MAX = 10
 BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
 LEARNING_RATE = 2e-5
@@ -90,7 +90,7 @@ def build_configs(
         "p_identity": 0.5,
         "w_image": IMAGE_SIZE,
         "h_image": IMAGE_SIZE,
-        "crop_size": PATCH_SIZE
+        "crop_size": CROP_SIZE
     }
     noiser = StegoPatchNoiser(noiser_configs)
     return {
