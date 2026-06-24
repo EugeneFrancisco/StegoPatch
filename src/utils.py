@@ -106,7 +106,7 @@ _lpips_net: lpips.LPIPS | None = None
 
 
 def _get_lpips_net(device: torch.device) -> lpips.LPIPS:
-    global _lpips_net
+    global _lpips_net # pylint: disable=global-statement
     if _lpips_net is None:
         # AlexNet backbone is the configuration recommended as a perceptual loss.
         _lpips_net = lpips.LPIPS(net="alex")

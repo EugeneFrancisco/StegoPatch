@@ -11,13 +11,31 @@ import src.plotting.image_plotting as image_plotting
 from src.watermarkers.stegopatch import StegoPatch
 from src.noisers.rosteals_noiser import RoSteALSNoiser
 
-TRAINING = True
+DEBUGGING = 0
+TRAINING = 1
+TESTING = 2
+
+MODE = DEBUGGING
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 PATCH_SIZE = 96
+IMAGE_SIZE = 288
 MESSAGE_LENGTH = 20
-BATCH_SIZE = 8 if TRAINING else 4
+if MODE in (TRAINING, TESTING):
+    BATCH_SIZE = 8
+    NUM_EPOCHS = 20
+    NUM_EPOCHS_FOR_SMALL_BATCH = 50_000
+    FIRST_EXPOSURE_SIZE = 8
+    SECOND_EXPOSURE_SIZE = 50_000
+    TRAINING_DATA_SIZE = 100_000
+else:
+    BATCH_SIZE = 2
+    NUM_EPOCHS = 2
+    NUM_EPOCHS_FOR_SMALL_BATCH = 2
+    FIRST_EXPOSURE_SIZE = 8
+    SECOND_EXPOSURE_SIZE = 16
+    TRAINING_DATA_SIZE = 32
 
 C_IMAGE = 3
 H_LITTLE = PATCH_SIZE / 8
@@ -28,9 +46,6 @@ BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
 LEARNING_RATE = 2e-5
-FIRST_EXPOSURE_SIZE = 8
-SECOND_EXPOSURE_SIZE = 50_000
-TRAINING_DATA_SIZE = 100_000
 LOG_TENSORBOARD = True if TRAINING else False
 
 
@@ -82,6 +97,8 @@ def build_configs(
         "dataset": dataset,
         "test_set": test_set,
         "batch_size": BATCH_SIZE,
+        "num_epochs": NUM_EPOCHS,
+        "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
         "training_data_sizes": {
             0: FIRST_EXPOSURE_SIZE,
             1: SECOND_EXPOSURE_SIZE,
@@ -125,7 +142,6 @@ def main(
         models_dir,
         tensorboard_log_dir
     )
-    stegopatch.train()
 
 
 

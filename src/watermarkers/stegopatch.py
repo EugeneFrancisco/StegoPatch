@@ -100,14 +100,12 @@ class StegoPatch(ImageWatermarker):
 
         # The number of epochs to run before stopping a checkpoint. Typically we won't run this
         # many epochs because the bit accuracy threshold should be crossed before this happens.
-        self.num_epochs = 20
+        self.num_epochs = self.configs["num_epochs"]
 
         # The number of epochs to run on the first (tiny) exposure set. That set is
         # only a minibatch or two, so a single "epoch" is just a step or two; this is
         # large to allow many passes over those few images before the threshold hits.
-        self.num_epochs_for_small_batch: int = self.configs.get(
-            "num_epochs_for_small_batch", 1000
-        )
+        self.num_epochs_for_small_batch: int = self.configs["num_epochs_for_small_batch"]
 
         # Controls the weight of the MSE loss for the quality loss objective.
         self.alpha: float = self.configs["alpha"]
