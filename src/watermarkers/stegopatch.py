@@ -352,8 +352,8 @@ class StegoPatch(ImageWatermarker):
             baby_dataset,
             bit_accuracy_threshold=0.9,
             max_epochs=self.num_epochs_for_small_batch,
-            save_every_epoch=False,
             start_time=start_time,
+            save_interval_steps=10_000,
             checkpoint=0
         )
         self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint1.pt")
@@ -369,7 +369,7 @@ class StegoPatch(ImageWatermarker):
             second_dataset,
             bit_accuracy_threshold=0.8,
             max_epochs=self.num_epochs,
-            save_every_epoch=True,
+            save_interval_epochs=1,
             start_time=start_time,
             checkpoint=1
         )
@@ -382,7 +382,7 @@ class StegoPatch(ImageWatermarker):
         self.train_until(
             second_dataset,
             bit_accuracy_threshold=0.95,
-            save_every_epoch=True,
+            save_interval_epochs=1,
             start_time=start_time,
             checkpoint=2
         )
@@ -393,7 +393,7 @@ class StegoPatch(ImageWatermarker):
         self.train_until(
             self.dataset,
             bit_accuracy_threshold=0.98,
-            save_every_epoch=True,
+            save_interval_epochs=1,
             start_time=start_time,
             checkpoint=3,
         )
@@ -411,7 +411,7 @@ class StegoPatch(ImageWatermarker):
         self.train_until(
             self.dataset,
             max_epochs=self.num_epochs,
-            save_every_epoch=True,
+            save_interval_epochs=1,
             start_time=start_time,
             checkpoint=4
         )
@@ -470,7 +470,7 @@ class StegoPatch(ImageWatermarker):
                 second_dataset,
                 bit_accuracy_threshold=0.8,
                 progress_bar="step",
-                save_every_epoch=True,
+                save_interval_epochs=1,
                 start_time=start_time,
                 checkpoint=1,
             )
@@ -484,7 +484,7 @@ class StegoPatch(ImageWatermarker):
                 second_dataset,
                 bit_accuracy_threshold=0.95,
                 progress_bar="step",
-                save_every_epoch=True,
+                save_interval_epochs=1,
                 start_time=start_time,
                 checkpoint=2,
             )
@@ -499,7 +499,7 @@ class StegoPatch(ImageWatermarker):
                 self.dataset,
                 bit_accuracy_threshold=0.98,
                 progress_bar="step",
-                save_every_epoch=True,
+                save_interval_epochs=1,
                 start_time=start_time,
                 checkpoint=3,
             )
@@ -519,7 +519,7 @@ class StegoPatch(ImageWatermarker):
             self.dataset,
             max_epochs=self.num_epochs,
             progress_bar="step",
-            save_every_epoch=True,
+            save_interval_epochs=1,
             start_time=start_time,
             checkpoint=4,
         )
@@ -570,7 +570,8 @@ class StegoPatch(ImageWatermarker):
             dataset: Dataset,
             bit_accuracy_threshold=None,
             max_epochs=None,
-            save_every_epoch=False,
+            save_interval_steps=None,
+            save_interval_epochs=None,
             progress_bar="epoch",
             start_time=None,
             checkpoint=None,
@@ -579,18 +580,27 @@ class StegoPatch(ImageWatermarker):
         Trains the message encoder and secret decoder on the passed in dataset
         until the threshold is reached or max_epochs is reached.
 
-        If ``save_every_epoch`` is True, the model is saved after each epoch finishes.
-        When ``start_time`` is provided, those per-epoch checkpoints are written next
-        to the ``train`` checkpoints (``{models_dir}/stegopatch_{start_time}/
-        checkpoint{checkpoint}_epoch_{n}.pt``) so they share the same run directory and
-        are grouped by the checkpoint phase that produced them; otherwise the default
-        ``save_model`` path is used. ``checkpoint`` is the number of the named checkpoint
-        this training phase culminates in.
+        ``save_interval_steps`` and ``save_interval_epochs`` control how often the
+        model is checkpointed during training. If ``save_interval_steps`` is set, the
+        model is saved every that many steps; if ``save_interval_epochs`` is set, the
+        model is saved every that many epochs. Either (or both) may be None, in which
+        case no saving happens at that cadence. When any saving is requested,
+        ``start_time`` and ``checkpoint`` must be provided so the per-interval
+        checkpoints are written next to the ``train`` checkpoints (``{models_dir}/
+        stegopatch_{start_time}/checkpoint{checkpoint}_step_{n}.pt`` or
+        ``...checkpoint{checkpoint}_epoch_{n}.pt``); they share the same run directory
+        and are grouped by the checkpoint phase that produced them. ``checkpoint`` is
+        the number of the named checkpoint this training phase culminates in.
 
         ``progress_bar`` controls where the tqdm bar lives: "epoch" (default) wraps
         the outer epoch loop, "step" wraps the inner per-batch loop within each epoch.
         """
         assert progress_bar in ("epoch", "step")
+
+        # Any per-interval checkpoint must be explicitly located: require a
+        # start_time (and checkpoint) so we always know where they land.
+        if save_interval_steps is not None or save_interval_epochs is not None:
+            assert start_time is not None and checkpoint is not None
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
@@ -644,6 +654,15 @@ class StegoPatch(ImageWatermarker):
                     self.tensorboard.add_scalar("beta", self.beta, self.step)
                 self.step += 1
 
+                if save_interval_steps is not None and self.step % save_interval_steps == 0:
+                    # Land per-step checkpoints in the same run directory the
+                    # train named checkpoints use, prefixed with the checkpoint
+                    # phase and tagged with the global step they correspond to.
+                    self.save_model(
+                        f"{self.models_dir}/stegopatch_{start_time}/"
+                        f"checkpoint{checkpoint}_step_{self.step}.pt"
+                    )
+
                 # Only stop once the rolling average over the last 10 batches
                 # (once the buffer is full) beats the threshold.
                 if (
@@ -655,11 +674,7 @@ class StegoPatch(ImageWatermarker):
                         return
                 self.update_beta()
 
-            if save_every_epoch:
-                # Per-epoch checkpoints must be explicitly located: require a
-                # start_time (and checkpoint) so we always know where they land.
-                assert start_time is not None and checkpoint is not None
-
+            if save_interval_epochs is not None and (epoch + 1) % save_interval_epochs == 0:
                 # Land per-epoch checkpoints in the same run directory the
                 # train named checkpoints use, prefixed with the checkpoint
                 # phase and tagged with the epoch they correspond to
