@@ -17,7 +17,7 @@ import src.utils as utils
 from src.watermarkers.image_watermarker import ImageWatermarker
 from src.autoencoders.autoencoder import AutoEncoder
 from src.autoencoders.vqgan import VQGAN
-from src.noisers.noiser import Noiser
+from src.noisers.stegopatch_noiser import StegoPatchNoiser
 
 class StegoPatch(ImageWatermarker):
     """
@@ -61,20 +61,13 @@ class StegoPatch(ImageWatermarker):
         # ============ Noising Material ===========
 
         # The noiser which we will ultimately use to apply noise between creating stego images
-        # and decoding messages.
-        self.noiser: Noiser = self.configs["noiser"]
+        # and decoding messages. train_until always applies it; the curriculum controls
+        # *which* corruptions are sampled by adjusting the noiser's probabilities.
+        self.noiser: StegoPatchNoiser = self.configs["noiser"]
 
-        # A flag for when to begin applying the full noise blend during training.
-        self.begin_noising: bool = False
-
-        # A flag for when to begin applying cropping noise. Unlike begin_noising,
-        # cropping is turned on from the very first checkpoint: robustness to
-        # cropping is the whole point of StegoPatch, so the model trains against
-        # crops before any other corruption is introduced.
-        self.begin_cropping: bool = False
-
-        # Probability that a batch is cropped while begin_cropping is on (and the
-        # full noise blend is still off).
+        # Probability of cropping during the early checkpoints, where cropping is the
+        # only active corruption. Robustness to cropping is the whole point of
+        # StegoPatch, so the model trains against crops before any other noise.
         self.crop_probability: float = 0.5
 
         # ========== Dataset Material =============
@@ -337,9 +330,13 @@ class StegoPatch(ImageWatermarker):
         # Timestamp of when training started, used to name the saved weights.
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        # Crop (with probability self.crop_probability) from checkpoint 0 onward;
-        # all other noise types stay off until checkpoint 4.
-        self.begin_cropping = True
+        # Crop with probability 0.5 until we are accurate enough to begin noising.
+        self.noiser.set_probabilities(
+            p_identity=1 - self.crop_probability,
+            p_differentiable=0,
+            p_imagenet=0,
+            p_crop=self.crop_probability
+        )
 
         # =================== Checkpoint 0 begins =================
         # Train one or two mini batches of data until the 0.9 bit accuracy threshold is reached.
@@ -403,12 +400,17 @@ class StegoPatch(ImageWatermarker):
         # =================== Checkpoint 4 begins =================
         # Turn on the full noise blend (differentiable + imagenet-c corruptions, alongside
         # cropping) to finish training for robustness.
-        self.begin_noising = True
+        self.noiser.set_probabilities(
+            p_identity=0.1,
+            p_differentiable=0.3,
+            p_imagenet=0.3,
+            p_crop=0.3
+        )
         self.train_until(
             self.dataset,
-            max_epochs=5,
+            max_epochs=self.num_epochs,
             save_every_epoch=True,
-            start_time=start_time, 
+            start_time=start_time,
             checkpoint=4
         )
         self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
@@ -442,8 +444,14 @@ class StegoPatch(ImageWatermarker):
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         # Cropping is enabled from the very first checkpoint, so every phase we can
-        # resume into (1-4) trains against crops.
-        self.begin_cropping = True
+        # resume into (1-4) trains against crops. The final phase widens this to the
+        # full blend.
+        self.noiser.set_probabilities(
+            p_identity=1 - self.crop_probability,
+            p_differentiable=0,
+            p_imagenet=0,
+            p_crop=self.crop_probability
+        )
 
         # Around half of the training data, matching the corresponding phases in train.
         second_dataset = Subset(
@@ -499,10 +507,15 @@ class StegoPatch(ImageWatermarker):
         # Turn on the full noise blend (differentiable + imagenet-c, alongside
         # cropping) to finish training for robustness.
         self.beta = self.beta_max
-        self.begin_noising = True
+        self.noiser.set_probabilities(
+            p_identity=0.1,
+            p_differentiable=0.3,
+            p_imagenet=0.3,
+            p_crop=0.3
+        )
         self.train_until(
             self.dataset,
-            max_epochs=5,
+            max_epochs=self.num_epochs,
             progress_bar="step",
             save_every_epoch=True,
             start_time=start_time,
@@ -603,12 +616,10 @@ class StegoPatch(ImageWatermarker):
                 # the noised image).
                 loss_quality = self.get_quality_loss(covers, stego_images)
 
-                # Apply noise only to what the decoder sees.
-                decoder_input = stego_images
-                if self.begin_noising:
-                    decoder_input = self.noiser.apply_noise(stego_images)
-                elif self.begin_cropping and np.random.rand() < self.crop_probability:
-                    decoder_input = self.noiser.get_noise_function("crop")(stego_images)
+                # Apply noise only to what the decoder sees. Which corruptions are in
+                # play is controlled entirely by the noiser's sampling probabilities,
+                # which the train method adjusts as the curriculum progresses.
+                decoder_input = self.noiser.apply_noise(stego_images)
 
                 recovered_messages = self.decode_batch(decoder_input)
 

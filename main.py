@@ -9,7 +9,7 @@ from torch.utils.data import Subset
 import src.utils as utils
 import src.plotting.image_plotting as image_plotting
 from src.watermarkers.stegopatch import StegoPatch
-from src.noisers.rosteals_noiser import RoSteALSNoiser
+from src.noisers.stegopatch_noiser import StegoPatchNoiser
 
 DEBUGGING = 0
 TRAINING = 1
@@ -37,6 +37,11 @@ else:
     SECOND_EXPOSURE_SIZE = 16
     TRAINING_DATA_SIZE = 32
 
+if MODE == TRAINING:
+    LOG_TENSORBOARD = True
+else:
+    LOG_TENSORBOARD = False
+
 C_IMAGE = 3
 H_LITTLE = PATCH_SIZE / 8
 W_LITTLE = PATCH_SIZE / 8
@@ -46,8 +51,6 @@ BETA_MIN = 0.1
 BETA_MAX = 10
 BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
 LEARNING_RATE = 2e-5
-LOG_TENSORBOARD = True if TRAINING else False
-
 
 def get_default_device() -> str:
     """Picks the best available torch device (cuda on Modal, mps locally)."""
@@ -79,7 +82,13 @@ def build_configs(
     dataset = utils.NpyImageDataset(data_path)
     dataset = Subset(dataset, range(TRAINING_DATA_SIZE))
     test_set = utils.NpyImageDataset(test_set_path) if test_set_path is not None else None
-    noiser = None
+    noiser_configs = {
+        "p_differentiable": 0,
+        "p_imagenet": 0,
+        "p_crop": 0.5,
+        "p_identity": 0.5
+    }
+    noiser = StegoPatchNoiser(noiser_configs)
     return {
         "device": device,
         "autoencoder_type": "VQGAN",
@@ -142,6 +151,7 @@ def main(
         models_dir,
         tensorboard_log_dir
     )
+    stegopatch.train()
 
 
 
@@ -163,8 +173,8 @@ def restart(
 
 if __name__ == "__main__":
     main(
-        data_path=Path("data/train2017_numpy_256.npy"),
+        data_path=Path("data/train2017_numpy_288.npy"),
         device=None,
-        models_dir="models",
-        tensorboard_log_dir="runs/rosteals",
+        models_dir="results/stegopatch/debugging1/models",
+        tensorboard_log_dir="results/stegopatch/debugging1/runs",
     )

@@ -19,15 +19,30 @@ class StegoPatchNoiser(RoSteALSNoiser):
         c = self.configs
 
         # Require every branch probability to be set explicitly (fail loudly otherwise).
-        self.p_identity = c["p_identity"]
-        self.p_diff = c["p_differentiable"]
-        self.p_imagenet = c["p_imagenet"]
-        self.p_crop = c["p_crop"]
+        self.set_probabilities(
+            p_identity=c["p_identity"],
+            p_differentiable=c["p_differentiable"],
+            p_imagenet=c["p_imagenet"],
+            p_crop=c["p_crop"],
+        )
 
         # The (square) side length of the random crop window.
         self.crop_size = int(c["crop_size"])
 
-        assert abs(self.p_identity + self.p_crop + self.p_diff + self.p_imagenet - 1.0) < 1e-6
+    # -- probability control -------------------------------------------------
+    def set_probabilities(
+        self,
+        p_identity: float,
+        p_differentiable: float,
+        p_imagenet: float,
+        p_crop: float,
+    ) -> None:
+        """Overwrite the branch sampling probabilities. They must sum to 1."""
+        assert abs(p_identity + p_differentiable + p_imagenet + p_crop - 1.0) < 1e-6
+        self.p_identity = p_identity
+        self.p_diff = p_differentiable
+        self.p_imagenet = p_imagenet
+        self.p_crop = p_crop
 
     # -- type normalisation --------------------------------------------------
     def _normalize_type(self, noise_type: Union[str, int]) -> int:
