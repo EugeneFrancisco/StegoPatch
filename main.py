@@ -20,7 +20,8 @@ MODE = DEBUGGING
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
 PATCH_SIZE = 96
-IMAGE_SIZE = 288
+IMAGE_SIZE = 384
+CROP_SIZE = 288
 MESSAGE_LENGTH = 20
 if MODE in (TRAINING, TESTING):
     BATCH_SIZE = 8
@@ -86,7 +87,10 @@ def build_configs(
         "p_differentiable": 0,
         "p_imagenet": 0,
         "p_crop": 0.5,
-        "p_identity": 0.5
+        "p_identity": 0.5,
+        "w_image": IMAGE_SIZE,
+        "h_image": IMAGE_SIZE,
+        "crop_size": PATCH_SIZE
     }
     noiser = StegoPatchNoiser(noiser_configs)
     return {
@@ -116,7 +120,7 @@ def build_configs(
         "models_dir": models_dir,
         "tensorboard_log_dir": tensorboard_log_dir,
         "log_tensorboard": LOG_TENSORBOARD,
-        "noiser": None
+        "noiser": noiser
     }
 
 def _build_stegopatch(
@@ -155,8 +159,6 @@ def main(
 
 
 
-
-
 def restart(
     save_path: str,
     checkpoint: int,
@@ -166,14 +168,14 @@ def restart(
     tensorboard_log_dir: str,
 ):
     """Resumes training from the checkpoint .pt file at ``save_path``."""
-    rosteals = _build_rosteals(data_path, device, models_dir, tensorboard_log_dir)
-    rosteals.restart_training(save_path, checkpoint)
+    stegopatch = _build_stegopatch(data_path, device, models_dir, tensorboard_log_dir)
+    stegopatch.restart_training(save_path, checkpoint)
 
 
 
 if __name__ == "__main__":
     main(
-        data_path=Path("data/train2017_numpy_288.npy"),
+        data_path=Path("data/train2017_numpy_384.npy"),
         device=None,
         models_dir="results/stegopatch/debugging1/models",
         tensorboard_log_dir="results/stegopatch/debugging1/runs",

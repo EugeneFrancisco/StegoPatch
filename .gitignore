@@ -7,3 +7,4 @@ __pycache__/
 models/*
 runs/*
 results/*/models/*
+*.pt
