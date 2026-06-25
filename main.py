@@ -88,9 +88,12 @@ def build_configs(
         "p_imagenet": 0,
         "p_crop": 0.5,
         "p_identity": 0.5,
+        "p_rotate": 0,
         "w_image": IMAGE_SIZE,
         "h_image": IMAGE_SIZE,
-        "crop_size": CROP_SIZE
+        "crop_size": CROP_SIZE,
+        "rotation_lower_bound": -30,
+        "rotation_upper_bound": 30,
     }
     noiser = StegoPatchNoiser(noiser_configs)
     return {
