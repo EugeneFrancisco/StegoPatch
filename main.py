@@ -158,7 +158,11 @@ def main(
         models_dir,
         tensorboard_log_dir
     )
-    stegopatch.train()
+    # stegopatch.load_model("results/stegopatch/experiment_1/models/stegopatch_2026-06-25_15-54-47/checkpoint4.pt")
+    cover = utils.load_random_image(Path("data/train2017"), IMAGE_SIZE)
+    message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
+    stego = stegopatch.encode_image(cover, message)
+    image_plotting.plot_side_by_side(cover, stego, Path("results/stegopatch/experiment_1/plots"))
 
 
 
@@ -180,6 +184,6 @@ if __name__ == "__main__":
     main(
         data_path=Path("data/train2017_numpy_384.npy"),
         device=None,
-        models_dir="results/stegopatch/debugging1/models",
-        tensorboard_log_dir="results/stegopatch/debugging1/runs",
+        models_dir=Path("results/stegopatch/debugging1/models"),
+        tensorboard_log_dir=Path("results/stegopatch/debugging1/runs"),
     )

@@ -2,6 +2,7 @@
 \usepackage{graphicx} % Required for inserting images
 \usepackage{newStyle}
 \usepackage{titling}
+\usepackage{stfloats}
 
 \setlength{\droptitle}{-4em}
 
@@ -21,6 +22,14 @@ Discuss Bui et al.\footnote{\TODO reference} and Tancik et al.\footnote{\TODO re
 
 \section{Methods}
 Watermarking derives from the much older process of steganography, where the goal is to conceal messages within another medium. Stated concretely, the goal of image watermarking is to take a so-called \textit{cover image} $c$ and message $m$ and generate a \textit{stego image} $\tilde c$ in which $m$ is somehow embedded; later on, a verifier should be able to take $\tilde c$ (possibly compressed or transformed in some way) and recover a message $\hat m$ which should be similar to $m$.
+
+\begin{center}
+	\begin{figure*}
+	\includegraphics[scale=0.32]{images/architecture_plot.png}
+	\caption{StegoStamp Watermarking and Decoding Architecture. The $\rm{message\ encoder}$ refers to $F_\theta$ and the $\rm{secret\ decoder}$ refers to $D_\varphi$.}
+\end{figure*}
+
+\end{center}
 \subsection{Architecture}
 StegoStamp trains two neural networks:
 \begin{enumerate}[label=(\roman*)]
@@ -79,6 +88,28 @@ We use a very small neural network for $F_\theta$ with only $9{,}168$ parameters
 \begin{verbatim}
 nn.Linear(20, 12 * 12 * 3),
 \end{verbatim}
+
+\section{Experiments}
+\TODO fill in with info about the experiments.
+
+\section{Results}
+\TODO fill in with photos of the images.
+
+\begin{figure}
+	\centering
+	\includegraphics[scale=0.25]{images/img1/cover.png}
+	\includegraphics[scale=0.25]{images/img1/stego.png}\\
+	\includegraphics[scale=0.25]{images/img2/cover.png}
+	\includegraphics[scale=0.25]{images/img2/stego.png}\\
+	\includegraphics[scale=0.25]{images/img3/cover.png}
+	\includegraphics[scale=0.25]{images/img3/stego.png}\\
+	\includegraphics[scale=0.25]{images/img4/cover.png}
+	\includegraphics[scale=0.25]{images/img4/stego.png}\\
+	\includegraphics[scale=0.25]{images/img5/cover.png}
+	\includegraphics[scale=0.25]{images/img5/stego.png}
+	\caption{Cover images (\textit{left}) and their watermarked counterparts (\textit{right}) produced by StegoPatch. Early experiments, light segmenting can still be seen in the airplane (top) and the pair talking (bottom).}
+	\label{fig:stego_images}
+\end{figure}
 
 
 

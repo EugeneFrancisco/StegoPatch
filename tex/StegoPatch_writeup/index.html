@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StegoPatch: Crop-Robust Image Watermarking</title>
+<style>
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    color: #1a1a1a;
+    line-height: 1.6;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  h1 {
+    font-size: 1.9em;
+    margin-bottom: 0.1em;
+  }
+  h2 {
+    font-size: 1.25em;
+    margin-top: 2em;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.2em;
+  }
+  .author {
+    color: #666;
+    margin-top: 0;
+  }
+  figure {
+    text-align: center;
+    margin: 1.5em 0;
+  }
+  figure img {
+    max-width: 100%;
+    height: auto;
+  }
+  figcaption {
+    color: #666;
+    font-size: 0.85em;
+    margin-top: 0.6em;
+  }
+  .pairs {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .pair {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+  }
+  .pair img {
+    width: 47%;
+    height: auto;
+    border: 1px solid #eee;
+  }
+  .col-head {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 4px;
+  }
+  .col-head span {
+    width: 47%;
+    text-align: center;
+  }
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .metrics-grid img {
+    width: 100%;
+    height: auto;
+    border: 1px solid #eee;
+  }
+</style>
+</head>
+<body>
+
+<h1>StegoPatch</h1>
+<p class="author">Crop-robust image watermarking &middot; Eugene Francisco</p>
+
+<h2>Summary</h2>
+<p>
+  <strong>Watermarking</strong> refers to the process of embedding a hidden message into generated
+  images so that those messages can later be recovered to verify the image's origin. The strongest
+  watermarkers embed these messages without any visible change to the original image and while
+  surviving common image compressions or manipulations. <strong>StegoPatch</strong> builds on the
+  latent-space approach of RoSteALS (Bui et al.), which embeds a message by adding a learned offset
+  to an image's representation inside a fixed autoencoder: a small <em>message encoder</em> neural network
+  converts messages into latent offsets, and a <em>secret decoder</em> (a modified ResNet-50) recovers
+  the message from the (possibly manipulated) watermarked image.
+  Only these two small networks are trained; the autoencoder stays frozen.
+</p>
+<p>
+  Our contribution with StegoPatch is <strong>robustness to spatial transformations</strong> like cropping
+  and rotation. Rather than watermarking the whole image at once, StegoPatch splits the cover into
+  fixed-size patches and embeds the same message into every patch. Because the message is repeated across
+  the image, a verifier can recover the message even when the image has been cropped. We train StegoPatch
+  against several other manipulations like blur, noise, and JPEG compression. The result is a watermark
+  that is almost invisible yet resiliant to spatial and lossy image manipulations that real images undergo.
+</p>
+<h2>Architecture</h2>
+<figure>
+  <img src="images/architecture_plot.png" alt="StegoPatch architecture diagram">
+  <figcaption>
+    StegoPatch watermarking and decoding pipeline. The message encoder &fnof;<sub>&theta;</sub>
+    produces a latent offset that is added to each patch's latent code before the frozen generator
+    reconstructs the watermarked image; the secret decoder D<sub>&phi;</sub> recovers the message.
+  </figcaption>
+</figure>
+<h2>Results So Far & What is Still Needed</h2>
+<p>
+  Our first experiments training StegoPatch already show lots of strengths. Image watermarks are essentially
+  invisible (see below) and, trained on 20-bit long messages with 384 by 384 images, StegoPatch has a bit
+  <strong>retrieval accuracy of 98%</strong>; combined with error correcting codes, this means that StegoPatch already has
+  lossless message recovery from watermarked images.
+</p>
+<p>
+  This being said, the quality of images can still be improved. In the examples below, faces are still
+  slightly distorted and patches are vaguely visible when the background is clear. To fix these,
+  further slight modifications of StegoPatch are necessary and compute is needed to run these experiments.
+  Because I don't have local access to GPUs, training so far has been done on NVIDIA A100 GPUs through
+  <a href="https://modal.com">Modal</a>, which cost <strong>$2.1 per hour to train</strong>. Training typically
+  takes 10 hours, so each training run costs me around $21. I believe that with four more experiments
+  (<strong>$84 worth of training</strong>) StegoPatch will show significant improvements in quality.
+</p>
+
+
+<h2>Example Results</h2>
+<p>
+  Watermarked images from our first experiment. Each row shows the original cover (left) and the
+  watermarked version (right). The embedded message is mostly invisible; however some patches can
+  still be seen, as with the plane (top) and the distorted faces (bottom).
+</p>
+<figure>
+  <div class="col-head"><span>Cover</span><span>Watermarked</span></div>
+  <div class="pairs">
+    <div class="pair"><img src="images/img1/cover.png" alt="cover 1"><img src="images/img1/stego.png" alt="watermarked 1"></div>
+    <div class="pair"><img src="images/img2/cover.png" alt="cover 2"><img src="images/img2/stego.png" alt="watermarked 2"></div>
+    <div class="pair"><img src="images/img3/cover.png" alt="cover 3"><img src="images/img3/stego.png" alt="watermarked 3"></div>
+    <div class="pair"><img src="images/img4/cover.png" alt="cover 4"><img src="images/img4/stego.png" alt="watermarked 4"></div>
+    <div class="pair"><img src="images/img5/cover.png" alt="cover 5"><img src="images/img5/stego.png" alt="watermarked 5"></div>
+  </div>
+</figure>
+
+<h2>Training Metrics</h2>
+<p>
+  Training curves from our first experiment, smoothed for readability (the faint lines show the raw,
+  unsmoothed values). The run spans two sessions, which line up into one continuous trajectory.
+  <strong>Bit accuracy</strong> climbs steadily toward ~98%, while the <strong>recovery</strong> and
+  <strong>quality</strong> losses fall &mdash; the message encoder and secret decoder learning to embed
+  and recover the message while keeping the watermark nearly invisible.
+</p>
+<figure>
+  <div class="metrics-grid">
+    <img src="images/metrics/bit_accuracy.png" alt="bit accuracy curve">
+    <img src="images/metrics/loss_recovery.png" alt="recovery loss curve">
+    <img src="images/metrics/loss_quality.png" alt="quality loss curve">
+    <img src="images/metrics/delta_l2.png" alt="delta L2 norm curve">
+  </div>
+  <figcaption>
+    Bit accuracy, recovery loss, quality loss, and the latent offset norm (&delta; L2) over training steps.
+  </figcaption>
+</figure>
+
+</body>
+</html>
