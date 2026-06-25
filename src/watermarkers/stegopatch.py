@@ -335,7 +335,8 @@ class StegoPatch(ImageWatermarker):
             p_identity=1 - self.crop_probability,
             p_differentiable=0,
             p_imagenet=0,
-            p_crop=self.crop_probability
+            p_crop=self.crop_probability,
+            p_rotate=0
         )
 
         # =================== Checkpoint 0 begins =================
@@ -404,9 +405,10 @@ class StegoPatch(ImageWatermarker):
         # cropping) to finish training for robustness.
         self.noiser.set_probabilities(
             p_identity=0.1,
-            p_differentiable=0.3,
-            p_imagenet=0.3,
-            p_crop=0.3
+            p_differentiable=0.25,
+            p_imagenet=0.25,
+            p_crop=0.25,
+            p_rotate=0.25
         )
         self.train_until(
             self.dataset,
@@ -452,7 +454,8 @@ class StegoPatch(ImageWatermarker):
             p_identity=1 - self.crop_probability,
             p_differentiable=0,
             p_imagenet=0,
-            p_crop=self.crop_probability
+            p_crop=self.crop_probability,
+            p_rotate=0
         )
 
         # Around half of the training data, matching the corresponding phases in train.
@@ -511,9 +514,10 @@ class StegoPatch(ImageWatermarker):
         self.beta = self.beta_max
         self.noiser.set_probabilities(
             p_identity=0.1,
-            p_differentiable=0.3,
-            p_imagenet=0.3,
-            p_crop=0.3
+            p_differentiable=0.25,
+            p_imagenet=0.25,
+            p_crop=0.25,
+            p_rotate=0.25
         )
         self.train_until(
             self.dataset,
