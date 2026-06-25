@@ -127,7 +127,8 @@
   further slight modifications of StegoPatch are necessary and compute is needed to run these experiments.
   Because I don't have local access to GPUs, training so far has been done on NVIDIA A100 GPUs through
   <a href="https://modal.com">Modal</a>, which cost <strong>$2.1 per hour to train</strong>. Training typically
-  takes 10 hours, so each training run costs me around $21. I believe that with four more experiments
+  takes a little less than 10 hours (see tensorboard metrics at the bottom of this page),
+  so each training run costs me around $21. I believe that with four more experiments
   (<strong>$84 worth of training</strong>) StegoPatch will show significant improvements in quality.
 </p>
 
@@ -152,20 +153,17 @@
 <h2>Training Metrics</h2>
 <p>
   Training curves from our first experiment, smoothed for readability (the faint lines show the raw,
-  unsmoothed values). The run spans two sessions, which line up into one continuous trajectory.
-  <strong>Bit accuracy</strong> climbs steadily toward ~98%, while the <strong>recovery</strong> and
-  <strong>quality</strong> losses fall &mdash; the message encoder and secret decoder learning to embed
-  and recover the message while keeping the watermark nearly invisible.
+  unsmoothed values). The run spans three sessions, which line up into one continuous trajectory.
+  Note in particular that <strong>Bit accuracy</strong> climbs crosses ~98%.
 </p>
 <figure>
   <div class="metrics-grid">
     <img src="images/metrics/bit_accuracy.png" alt="bit accuracy curve">
     <img src="images/metrics/loss_recovery.png" alt="recovery loss curve">
-    <img src="images/metrics/loss_quality.png" alt="quality loss curve">
     <img src="images/metrics/delta_l2.png" alt="delta L2 norm curve">
   </div>
   <figcaption>
-    Bit accuracy, recovery loss, quality loss, and the latent offset norm (&delta; L2) over training steps.
+    Bit accuracy, recovery loss, and the latent offset norm (&delta; L2) over training steps.
   </figcaption>
 </figure>
 
