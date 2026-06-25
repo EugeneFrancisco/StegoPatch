@@ -1,7 +1,8 @@
 """
 This file defines a noising class for use with the stegopatch watermarker. It is identical to the
 RoSteALSNoiser except that it adds a cropping noise: when cropping is sampled, the whole batch is
-cropped to a single random crop_size x crop_size window.
+cropped to a single random rectangular window whose height and width are sampled independently and
+uniformly, each at least crop_size and at most the corresponding image dimension.
 """
 from typing import Union, Callable
 import numpy as np
@@ -67,20 +68,24 @@ class StegoPatchNoiser(RoSteALSNoiser):
 
     # -- crop ----------------------------------------------------------------
     def _crop_noise(self, x: torch.Tensor) -> torch.Tensor:
-        """Crop the whole (B, C, H, W) batch to a single random crop_size x crop_size window.
+        """Crop the whole (B, C, H, W) batch to a single random rectangular window. The crop
+        height and width are sampled independently and uniformly, each at least crop_size and at
+        most the corresponding image dimension.
         Slicing is differentiable, so gradients flow through to the kept region."""
         _, _, h, w = x.shape
-        cs = self.crop_size
-        top = int(np.random.randint(0, h - cs + 1))
-        left = int(np.random.randint(0, w - cs + 1))
-        return x[:, :, top:top + cs, left:left + cs]
+        ch = int(np.random.randint(self.crop_size, h + 1))
+        cw = int(np.random.randint(self.crop_size, w + 1))
+        top = int(np.random.randint(0, h - ch + 1))
+        left = int(np.random.randint(0, w - cw + 1))
+        return x[:, :, top:top + ch, left:left + cw]
 
     # -- numpy entry point ---------------------------------------------------
     def apply_noise_np(self, image: np.ndarray, noise_type: Union[str, int]) -> np.ndarray:
         if self._normalize_type(noise_type) == self.CROP:
             h, w = image.shape[:2]
-            cs = self.crop_size
-            top = int(np.random.randint(0, h - cs + 1))
-            left = int(np.random.randint(0, w - cs + 1))
-            return image[top:top + cs, left:left + cs].copy()
+            ch = int(np.random.randint(self.crop_size, h + 1))
+            cw = int(np.random.randint(self.crop_size, w + 1))
+            top = int(np.random.randint(0, h - ch + 1))
+            left = int(np.random.randint(0, w - cw + 1))
+            return image[top:top + ch, left:left + cw].copy()
         return super().apply_noise_np(image, noise_type)
