@@ -245,7 +245,7 @@ class StegoPatch(ImageWatermarker):
             A (B, C, H, W) tensor of images that have been watermarked.
         """
 
-        B, C, H, W = covers.shape
+        B, _, H, W = covers.shape
 
         assert H == W
         assert H % self.patch_size == 0
@@ -254,19 +254,28 @@ class StegoPatch(ImageWatermarker):
         nh = H // self.patch_size
         nw = W // self.patch_size
 
-        # First, "unravel" each cover into its patches and stack every image's patches
-        # together, giving a tensor of shape (B * nh * nw, C, patch_size, patch_size).
-        #
-        # Split each spatial axis into (tile_index, within_tile_offset), move the tile
-        # indices next to the batch dim, then flatten (B, nh, nw) into one leading axis.
-        # The (nh, nw) ordering is row-major (patch (i, j) lands at flat index
-        # i * nw + j within each image), which we rely on to stitch patches back together.
-        patches = covers.reshape(B, C, nh, self.patch_size, nw, self.patch_size)
-        patches = patches.permute(0, 2, 4, 1, 3, 5)
-        patches = patches.reshape(B * nh * nw, C, self.patch_size, self.patch_size)
+        # Encode the entire image to a single latent of shape (B, c_latent, H/4, W/4).
+        latent = self.image_autoencoder.encode(covers)
 
-        # Now placed in the latent space.
-        patches_latent = self.image_autoencoder.encode(patches)
+        # The full latent's spatial dimensions, and the per-patch latent dimensions.
+        # Each patch_size x patch_size pixel patch maps to an
+        # h_latent x w_latent = patch_size/4 x patch_size/4 latent patch, so the same
+        # nh x nw patch grid carves the latent exactly.
+        _, _, Hl, Wl = latent.shape
+        assert Hl == nh * self.h_latent and Wl == nw * self.w_latent
+
+        # "Unravel" the latent into its patches and stack every image's patches together,
+        # giving (B * nh * nw, c_latent, h_latent, w_latent). Split each spatial axis into
+        # (tile_index, within_tile_offset), move the tile indices next to the batch dim,
+        # then flatten (B, nh, nw) into one leading axis. The (nh, nw) ordering is
+        # row-major, which we rely on to stitch the patches back together.
+        patches_latent = latent.reshape(
+            B, self.c_latent, nh, self.h_latent, nw, self.w_latent
+        )
+        patches_latent = patches_latent.permute(0, 2, 4, 1, 3, 5)
+        patches_latent = patches_latent.reshape(
+            B * nh * nw, self.c_latent, self.h_latent, self.w_latent
+        )
 
         # Number of patches per image.
         num_patches = nh * nw
@@ -288,15 +297,20 @@ class StegoPatch(ImageWatermarker):
         assert deltas.shape == patches_latent.shape
 
         watermarked_patches_latent = patches_latent + deltas
-        watermarked_patches = self.image_autoencoder.decode(watermarked_patches_latent)
 
-        # Stitch the watermarked patches back into full images. This inverts the unravel
-        # above: split the flat patch axis back into (B, nh, nw), move the spatial tile
-        # indices back next to their within-patch offsets, then merge each (nh, patch_size)
-        # and (nw, patch_size) pair into the full H and W.
-        watermarked = watermarked_patches.reshape(B, nh, nw, C, self.patch_size, self.patch_size)
-        watermarked = watermarked.permute(0, 3, 1, 4, 2, 5)
-        watermarked = watermarked.reshape(B, C, H, W)
+        # Stitch the watermarked latent patches back into a full latent. This inverts the
+        # unravel above: split the flat patch axis back into (B, nh, nw), move the spatial
+        # tile indices back next to their within-patch offsets, then merge each
+        # (nh, h_latent) and (nw, w_latent) pair into the full Hl and Wl.
+        watermarked_latent = watermarked_patches_latent.reshape(
+            B, nh, nw, self.c_latent, self.h_latent, self.w_latent
+        )
+        watermarked_latent = watermarked_latent.permute(0, 3, 1, 4, 2, 5)
+        watermarked_latent = watermarked_latent.reshape(B, self.c_latent, Hl, Wl)
+
+        # Decode the whole watermarked latent once, so there is no pixel-space stitching
+        # boundary and the watermarked image is globally consistent.
+        watermarked = self.image_autoencoder.decode(watermarked_latent)
 
         return watermarked
 
