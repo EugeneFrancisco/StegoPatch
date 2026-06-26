@@ -1,0 +1,8 @@
+Legacy model.
+Only cropping during first part of training.
+Rotation is only exposed during the last noising part.
+
+Message encoder architecture goes
+cover -> patches -> VQGAN -> watermarked -> VQGAN -> patches -> watermark
+
+which is the legacy architecture.
