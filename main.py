@@ -9,6 +9,7 @@ from torch.utils.data import Subset
 import src.utils as utils
 import src.plotting.image_plotting as image_plotting
 from src.watermarkers.stegopatch import StegoPatch
+from src.watermarkers.stegopatch_legacy import StegoPatchLegacy
 from src.noisers.stegopatch_noiser import StegoPatchNoiser
 
 DEBUGGING = 0
@@ -23,6 +24,10 @@ PATCH_SIZE = 96
 IMAGE_SIZE = 384
 CROP_SIZE = 288
 MESSAGE_LENGTH = 20
+P_CROP = 0.25
+P_ROTATE = 0.25
+P_IDENTITY = 0.5
+ROTATION_BOUND = 30
 if MODE in (TRAINING, TESTING):
     BATCH_SIZE = 8
     NUM_EPOCHS = 20
@@ -86,14 +91,14 @@ def build_configs(
     noiser_configs = {
         "p_differentiable": 0,
         "p_imagenet": 0,
-        "p_crop": 0.5,
-        "p_identity": 0.5,
-        "p_rotate": 0,
+        "p_crop": P_CROP,
+        "p_identity": P_IDENTITY,
+        "p_rotate": P_ROTATE,
         "w_image": IMAGE_SIZE,
         "h_image": IMAGE_SIZE,
         "crop_size": CROP_SIZE,
-        "rotation_lower_bound": -30,
-        "rotation_upper_bound": 30,
+        "rotation_lower_bound": -ROTATION_BOUND,
+        "rotation_upper_bound": ROTATION_BOUND,
     }
     noiser = StegoPatchNoiser(noiser_configs)
     return {
@@ -152,17 +157,14 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    stegopatch = _build_stegopatch(
+    configs = build_configs(
         data_path,
         device,
         models_dir,
         tensorboard_log_dir
     )
-    # stegopatch.load_model("results/stegopatch/experiment_1/models/stegopatch_2026-06-25_15-54-47/checkpoint4.pt")
-    cover = utils.load_random_image(Path("data/train2017"), IMAGE_SIZE)
-    message = np.random.randint(0, 2, (MESSAGE_LENGTH, 1))
-    stego = stegopatch.encode_image(cover, message)
-    image_plotting.plot_side_by_side(cover, stego, Path("results/stegopatch/experiment_1/plots"))
+    stegopatch = StegoPatch(configs)
+    stegopatch.train()
 
 
 
