@@ -54,9 +54,12 @@ W_LITTLE = PATCH_SIZE / 8
 C_LITTLE = 3
 ALPHA = 1.5
 BETA_MIN = 0.08
-BETA_MAX = 10
-BETA_DELTA = (BETA_MAX - BETA_MIN) / 5_000 # just from observation, it seems like 5k steps till convergence roughly
+BETA_MAX = 11
+BETA_DELTA = (BETA_MAX - BETA_MIN) / 6_000 # just from observation, it seems like 5k steps till convergence roughly
 LEARNING_RATE = 2e-5
+# How often (in steps) to overwrite the rolling auto-resume checkpoint so a run
+# that gets restarted (e.g. by Modal) can pick back up where it left off.
+NUM_STEPS_TO_SAVE = 5_000
 
 def get_default_device() -> str:
     """Picks the best available torch device (cuda on Modal, mps locally)."""
@@ -126,6 +129,10 @@ def build_configs(
             2: TRAINING_DATA_SIZE
         },
         "models_dir": models_dir,
+        # The rolling auto-resume checkpoint lives in its own directory, distinct
+        # from the run-named checkpoints under models_dir.
+        "autosave_dir": f"{models_dir}/autosave",
+        "num_steps_to_save": NUM_STEPS_TO_SAVE,
         "tensorboard_log_dir": tensorboard_log_dir,
         "log_tensorboard": LOG_TENSORBOARD,
         "noiser": noiser

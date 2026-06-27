@@ -149,6 +149,22 @@ class StegoPatch(ImageWatermarker):
         # when run remotely). Required: fail loudly if it isn't configured.
         self.models_dir: str = self.configs["models_dir"]
 
+        # How often (in training steps) to drop a rolling auto-resume checkpoint
+        # so a run that gets killed mid-training (e.g. Modal restarting it) can
+        # pick back up. This is completely separate from the named / per-epoch
+        # checkpoints written by save_model, which are left untouched.
+        self.num_steps_to_save: int = self.configs.get("num_steps_to_save", 5_000)
+
+        # A distinct directory (separate from the run-named checkpoints) holding
+        # a single rolling checkpoint. It is overwritten every num_steps_to_save
+        # steps, so only one auto-resume checkpoint ever exists at a time, and it
+        # records the curriculum phase it came from so train / restart_training
+        # can resume at the right place.
+        self.autosave_dir: str = self.configs.get(
+            "autosave_dir", f"{self.models_dir}/autosave"
+        )
+        self.autosave_path: str = f"{self.autosave_dir}/autosave_checkpoint.pt"
+
         # ====== validation material =========
         self.test_set = self.configs.get("test_set", None)
 
@@ -336,6 +352,21 @@ class StegoPatch(ImageWatermarker):
         until the final checkpoint. The frozen image autoencoder is used as-is;
         only the message encoder and secret decoder are optimized.
         """
+        # If a rolling auto-resume checkpoint is present, a previous run was
+        # interrupted (e.g. Modal restarted it), so resume from it instead of
+        # starting over.
+        if os.path.exists(self.autosave_path):
+            phase = self._autosave_phase()
+            if phase >= 1:
+                # Phases 1-4 map directly onto restart_training's curriculum, so
+                # hand off and let it run from there to the end.
+                self.restart_training(self.autosave_path, phase)
+                return
+            # Phase 0 is the tiny initial "baby" phase, which restart_training
+            # doesn't cover. Restore the saved weights and fall through to rerun
+            # train from the top; the baby set recovers in a few steps.
+            self.load_model(self.autosave_path)
+
         assert len(self.dataset) == self.training_data_size
 
         self.secret_decoder.train()
@@ -433,6 +464,10 @@ class StegoPatch(ImageWatermarker):
         )
         self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
 
+        # Training finished cleanly: drop the rolling auto-resume checkpoint so
+        # the next fresh run isn't mistaken for an interrupted one.
+        self._clear_autosave()
+
     def restart_training(self, save_path: str, checkpoint: int) -> None:
         """
         Resumes training from the weights saved at ``save_path``, picking the
@@ -450,6 +485,15 @@ class StegoPatch(ImageWatermarker):
                 3 - expose the full training set until bit accuracy reaches 0.98.
                 4 - turn on the full noise blend and finish training.
         """
+        # If a rolling auto-resume checkpoint is present it reflects more recent
+        # progress than the explicitly requested checkpoint (e.g. the run was
+        # restarted partway through this resumed training), so prefer it.
+        if os.path.exists(self.autosave_path):
+            autosave_phase = self._autosave_phase()
+            if autosave_phase >= 1:
+                save_path = self.autosave_path
+                checkpoint = autosave_phase
+
         assert checkpoint in (1, 2, 3, 4)
 
         # Restore weights, optimizer state, and the beta schedule progress.
@@ -543,27 +587,60 @@ class StegoPatch(ImageWatermarker):
         )
         self.save_model(f"{self.models_dir}/stegopatch_{start_time}/checkpoint5.pt")
 
-    def save_model(self, path: str) -> None:
+        # Training finished cleanly: drop the rolling auto-resume checkpoint so
+        # the next fresh run isn't mistaken for an interrupted one.
+        self._clear_autosave()
+
+    def save_model(self, path: str, phase: int | None = None) -> None:
         """
         Saves the trainable network weights (message encoder and secret decoder)
         to ``path``. The frozen autoencoder is not saved.
+
+        ``phase`` is only set for the rolling auto-resume checkpoint, where it
+        records which curriculum phase produced the save so training can pick
+        back up at the right place. It is left out entirely for the named /
+        per-epoch checkpoints, so their on-disk format is unchanged.
         """
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(
-            {
-                "message_encoder": self.message_encoder.state_dict(),
-                "secret_decoder": self.secret_decoder.state_dict(),
-                # Optimizer state (AdamW moments + step counts) so training can
-                # resume without restarting the optimizer cold.
-                "optimizer": self.optimizer.state_dict(),
-                # Training progress that mutates across train_until calls and is
-                # needed to pick the beta schedule back up exactly where we left off.
-                "beta": self.beta,
-                "update_flag": self.update_flag,
-                "step": self.step,
-            },
-            path,
-        )
+        state = {
+            "message_encoder": self.message_encoder.state_dict(),
+            "secret_decoder": self.secret_decoder.state_dict(),
+            # Optimizer state (AdamW moments + step counts) so training can
+            # resume without restarting the optimizer cold.
+            "optimizer": self.optimizer.state_dict(),
+            # Training progress that mutates across train_until calls and is
+            # needed to pick the beta schedule back up exactly where we left off.
+            "beta": self.beta,
+            "update_flag": self.update_flag,
+            "step": self.step,
+        }
+        if phase is not None:
+            state["phase"] = phase
+        torch.save(state, path)
+
+    def _save_autosave(self, phase: int) -> None:
+        """
+        Overwrites the single rolling auto-resume checkpoint, recording the
+        curriculum ``phase`` that produced it. Writes to a temporary file and
+        atomically renames it into place so a crash mid-write can never corrupt
+        the existing checkpoint.
+        """
+        os.makedirs(self.autosave_dir, exist_ok=True)
+        tmp_path = f"{self.autosave_path}.tmp"
+        self.save_model(tmp_path, phase=phase)
+        os.replace(tmp_path, self.autosave_path)
+
+    def _autosave_phase(self) -> int:
+        """
+        Returns the curriculum phase recorded in the rolling auto-resume
+        checkpoint (assumes it exists).
+        """
+        return torch.load(self.autosave_path, map_location=self.device)["phase"]
+
+    def _clear_autosave(self) -> None:
+        """Removes the rolling auto-resume checkpoint, if present."""
+        if os.path.exists(self.autosave_path):
+            os.remove(self.autosave_path)
 
     def load_model(self, path: str) -> None:
         """
@@ -622,9 +699,9 @@ class StegoPatch(ImageWatermarker):
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        # Rolling buffer of the previous 10 bit accuracies, used to smooth out
+        # Rolling buffer of the previous 15 bit accuracies, used to smooth out
         # noise before deciding whether the threshold has been reached.
-        recent_bit_accuracies = deque(maxlen=10)
+        recent_bit_accuracies = deque(maxlen=15)
 
         epochs = range(max_epochs)
         if progress_bar == "epoch":
@@ -671,6 +748,18 @@ class StegoPatch(ImageWatermarker):
                     self.tensorboard.add_scalar("bit_accuracy", bit_accuracy, self.step)
                     self.tensorboard.add_scalar("beta", self.beta, self.step)
                 self.step += 1
+
+                # Rolling auto-resume checkpoint: overwrite a single file every
+                # num_steps_to_save steps so an interrupted run can pick back up.
+                # Independent of the named / per-interval checkpoints below; we
+                # need the curriculum phase (``checkpoint``) to know where to
+                # resume, so this only fires when a phase is supplied.
+                if (
+                    self.num_steps_to_save
+                    and checkpoint is not None
+                    and self.step % self.num_steps_to_save == 0
+                ):
+                    self._save_autosave(checkpoint)
 
                 if save_interval_steps is not None and self.step % save_interval_steps == 0:
                     # Land per-step checkpoints in the same run directory the
