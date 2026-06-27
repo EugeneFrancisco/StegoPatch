@@ -146,7 +146,7 @@ class StegoPatch(ImageWatermarker):
         self.step = 0
 
         # The directory where model checkpoints are written (a Modal Volume path
-        # when run remotely). Required: fail loudly if it isn't configured.
+        # when run remotely).
         self.models_dir: str = self.configs["models_dir"]
 
         # How often (in training steps) to drop a rolling auto-resume checkpoint
@@ -699,9 +699,9 @@ class StegoPatch(ImageWatermarker):
         max_epochs = max_epochs if max_epochs is not None else self.num_epochs
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        # Rolling buffer of the previous 15 bit accuracies, used to smooth out
+        # Rolling buffer of the previous 18 bit accuracies, used to smooth out
         # noise before deciding whether the threshold has been reached.
-        recent_bit_accuracies = deque(maxlen=15)
+        recent_bit_accuracies = deque(maxlen=18)
 
         epochs = range(max_epochs)
         if progress_bar == "epoch":
