@@ -25,13 +25,16 @@ Discuss Bui et al.\footnote{\TODO reference} and Tancik et al.\footnote{\TODO re
 \section{Methods}
 Watermarking derives from the much older technique of steganography, where the challenge is to conceal messages within another medium. Stated concretely, the goal of image watermarking is to take a so-called \textit{cover image} $c$ and message $m$ and generate a \textit{stego image} $\tilde c$ in which $m$ is somehow embedded; later on, a verifier should be able to take $\tilde c$ (which has potentially been compressed or transformed in some way) and recover a message $\hat m$ which should be similar to $m$.
 
+StegoPatch is a so-called \textit{post-hoc} watermarker, meaning it embeds messages \textit{on-top} of already generated images. This is as opposed to an \textit{ad-hoc} watermarker, which embeds messages into the generated content at the same time that the content is being generated.
+
 \begin{center}
 	\begin{figure*}
 	\includegraphics[scale=0.32]{images/architecture_plot.png}
+	
 	\caption{StegoPatch Watermarking and Decoding Architecture. The $\rm{message\ encoder}$ refers to $F_\theta$ and the $\rm{secret\ decoder}$ refers to $D_\varphi$.}
 \end{figure*}
-
 \end{center}
+
 \subsection{Architecture}
 StegoPatch trains two neural networks:
 \begin{enumerate}[label=(\roman*)]
@@ -114,7 +117,7 @@ We use curriculum learning to train $F_\theta$ and $D_\varphi$. Learning is spli
 \end{enumerate}
 
 \section{Implementation Details}
-For simplicity, we trained on square images of size $384\times 384$ using a patch size of $P = 96$. All of our experiments are done with a message length of $\ell = 20$. We picked $\alpha = 1.5$ as in RoSteALS. We chose $\beta = 0.8$ and increment $\beta$ linearly until $\beta_{\mathrm{max}} = 11$ in training phase 3. The bit accuracy thresholds are set to $t_1 = 0.9, t_2 = 0.8, t_3 = 0.95, t_4 = 0.98$. We used the first $100{,}000$ images from the COCO training dataset from 2017. We optimize the objective in (3) using stochastic gradient descent (in PyTorch), a minibatch size of $8$, and the AdamW optimizer with a learning rate of $2\cdot 10^{-5}$.
+For simplicity, we trained on square images of size $384\times 384$ using a patch size of $P = 96$. All of our experiments are done with a message length of $\ell = 20$. We picked $\alpha = 1.5$ as in RoSteALS. We chose $\beta = 0.8$ and increment $\beta$ linearly until $\beta_{\mathrm{max}} = 15$ in training phase 3. The bit accuracy thresholds are set to $t_1 = 0.9, t_2 = 0.8, t_3 = 0.95, t_4 = 0.98$. The last training phase we trained for $k = 3$ epochs. We used the first $100{,}000$ images from the COCO training dataset from 2017. We optimize the objective in (3) using stochastic gradient descent (in PyTorch), a minibatch size of $8$, and the AdamW optimizer with a learning rate of $2\cdot 10^{-5}$. Training was done on an NVIDIA A100 40GB GPU and took around 10 hours per experiment.
 
 We use a very small neural network for $F_\theta$ with only $9{,}168$ parameters. The network is described by the following PyTorch Sequential network:
 \begin{verbatim}
@@ -127,28 +130,8 @@ nn.Conv2d(3, 3, 1)
 \end{verbatim}
 where, as in RoSteALS, the final layer is $0$-initialized so that $\delta = 0$ at the start training. 
 
-\section{Experiments}
-\TODO fill in with info about the experiments.
-
 \section{Results}
 \TODO fill in with photos of the images.
-
-\begin{figure}
-	\centering
-	\includegraphics[scale=0.25]{images/img1/cover.png}
-	\includegraphics[scale=0.25]{images/img1/stego.png}\\
-	\includegraphics[scale=0.25]{images/img2/cover.png}
-	\includegraphics[scale=0.25]{images/img2/stego.png}\\
-	\includegraphics[scale=0.25]{images/img3/cover.png}
-	\includegraphics[scale=0.25]{images/img3/stego.png}\\
-	\includegraphics[scale=0.25]{images/img4/cover.png}
-	\includegraphics[scale=0.25]{images/img4/stego.png}\\
-	\includegraphics[scale=0.25]{images/img5/cover.png}
-	\includegraphics[scale=0.25]{images/img5/stego.png}
-	\caption{Cover images (\textit{left}) and their watermarked counterparts (\textit{right}) produced by StegoPatch. Early experiments, light segmenting can still be seen in the airplane (top) and the pair talking (bottom).}
-	\label{fig:stego_images}
-\end{figure}
-
 
 
 

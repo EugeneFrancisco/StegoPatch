@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StegoPatch: Crop-Robust Image Watermarking</title>
+<script>
+  // Use \( ... \) for inline math and \[ ... \] for display math.
+  window.MathJax = {
+    tex: {
+      inlineMath: [['\\(', '\\)']],
+      displayMath: [['\\[', '\\]']]
+    }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 <style>
   body {
     font-family: Helvetica, Arial, sans-serif;
@@ -39,6 +49,7 @@
     color: #666;
     font-size: 0.85em;
     margin-top: 0.6em;
+    text-align: left;
   }
   .pairs {
     display: flex;
@@ -78,58 +89,95 @@
     height: auto;
     border: 1px solid #eee;
   }
+  .cite {
+    font-size: 0.7em;
+    vertical-align: super;
+    line-height: 0;
+    text-decoration: none;
+    margin-left: 1px;
+  }
+  .references {
+    color: #444;
+    font-size: 0.9em;
+    padding-left: 1.2em;
+  }
+  .references li {
+    margin-bottom: 0.5em;
+  }
 </style>
 </head>
 <body>
 
 <h1>StegoPatch</h1>
 <p class="author">Crop-robust image watermarking &middot; Eugene Francisco</p>
+<figure>
+  <img src="images/stella/title_picture.png" alt="StegoPatch title image">
+  <figcaption>
+    Original via Christie<a href="#ref-1" class="cite">1</a>.
+  </figcaption>
+</figure>
 
 <h2>Summary</h2>
 <p>
-  <strong>Watermarking</strong> refers to the process of embedding a hidden message into generated
-  images so that those messages can later be recovered to verify the image's origin. The strongest
-  watermarkers embed these messages without any visible change to the original image and while
-  surviving common image compressions or manipulations. <strong>StegoPatch</strong> builds on the
-  latent-space approach of RoSteALS (Bui et al.), which embeds a message by adding a learned offset
-  to an image's representation inside a fixed autoencoder: a small <em>message encoder</em> neural network
-  converts messages into latent offsets, and a <em>secret decoder</em> (a modified ResNet-50) recovers
-  the message from the (possibly manipulated) watermarked image.
-  Only these two small networks are trained; the autoencoder stays frozen.
+  AI generated data is becoming harder and harder to tell apart from real world content.
+  <strong>Watermarking</strong> refers to the process of embedding hidden messages into generated
+  content so that those messages can later be recovered to verify the data's origin.
 </p>
 <p>
-  Our contribution with StegoPatch is <strong>robustness to spatial transformations</strong> like cropping
-  and rotation. Rather than watermarking the whole image at once, StegoPatch splits the cover into
-  fixed-size patches and embeds the same message into every patch. Because the message is repeated across
-  the image, a verifier can recover the message even when the image has been cropped. We train StegoPatch
-  against several other manipulations like blur, noise, and JPEG compression. The result is a watermark
-  that is almost invisible yet resiliant to spatial and lossy image manipulations that real images undergo.
+  <strong>StegoPatch</strong> is an image watermarker that is virtually invisible to the human eye
+  and is robust to common image manipulations like cropping, rotation, blur, and lossy compression.
+  StegoPatch can be easily scaled to different image resolutions, even those different from what
+  it was trained on. Our work builds on the work of Bui et al.<a href="#ref-2" class="cite">2</a> and
+  Tancik et al.<a href="#ref-3" class="cite">3</a> to add robustness to spatial manipulations in
+  existing image watermarkers.
 </p>
 <h2>Architecture</h2>
 <figure>
   <img src="images/architecture_plot.png" alt="StegoPatch architecture diagram">
   <figcaption>
-    StegoPatch watermarking and decoding pipeline. The message encoder &fnof;<sub>&theta;</sub>
+    StegoPatch watermarking and decoding pipeline. The message encoder \(F_\theta\)
     produces a latent offset that is added to each patch's latent code before the frozen generator
-    reconstructs the watermarked image; the secret decoder D<sub>&phi;</sub> recovers the message.
+    reconstructs the watermarked image; the secret decoder \(D_\varphi\) recovers the message.
   </figcaption>
 </figure>
-<h2>Results So Far & What is Still Needed</h2>
 <p>
-  Our first experiments training StegoPatch already show lots of strengths. Image watermarks are essentially
-  invisible (see below) and, trained on 20-bit long messages with 384 by 384 images, StegoPatch has a bit
-  <strong>retrieval accuracy of 98%</strong>; combined with error correcting codes, this means that StegoPatch already has
-  lossless message recovery from watermarked images.
+  StegoPatch trains two neural networks: a message encoder \(F_\theta\) and a secret decoder
+  \(D_\varphi\). The message encoder takes advantage of a convolutional image autoencoder.
+  Following Bui et al., we chose the VQGAN autoencoder<a href="#ref-4" class="cite">4</a> for our purposes.
 </p>
 <p>
-  This being said, the quality of images can still be improved. In the examples below, faces are still
-  slightly distorted and patches are vaguely visible when the background is clear. To fix these,
-  further slight modifications of StegoPatch are necessary and compute is needed to run these experiments.
-  Because I don't have local access to GPUs, training so far has been done on NVIDIA A100 GPUs through
-  <a href="https://modal.com">Modal</a>, which cost <strong>$2.1 per hour to train</strong>. Training typically
-  takes a little less than 10 hours (see tensorboard metrics at the bottom of this page),
-  so each training run costs me around $21. I believe that with four more experiments
-  (<strong>$84 worth of training</strong>) StegoPatch will show significant improvements in quality.
+  To encode a message \(m\) into an image \(c\), the image \(c\) is sent to its latent reprentation
+  \(z\) using the image autoencoder. The latent variable \(z\) is split into discrete patches, each
+  of which is watermarked using \(m\) and \(F_\theta\). The patches are stitched back together to
+  form \(\tilde z\) before being sent back through the autoencoder to form the final watermarked
+  image \(\tilde c\).
+</p>
+<p>
+  To decode a message from an image \(c\), we feed \(c\) through \(D_\varphi\), a modified ResNet-50
+  which outputs a predicted message.
+</p>
+<p>
+  More implementation details can be found here: TODO add link.
+</p>
+<h2>Results</h2>
+<p>
+  TODO
+</p>
+
+<h2>Future Work</h2>
+<p>
+The most challenging part of building StegoPatch is ensuring robustness to JPEG compression.
+There is a tradeoff when training between the quality of the watermarker and the robustness to lossy
+compresion: more reliable watermarkers tend to have stronger artifacts like patches of discoloration
+in the watermarked image.
+</p>
+
+<p>
+One way to possibly address this in the future is to more carefully choose where to place
+watermarked patches. Instead of periodically tiling the image with the message, one could choose
+places in the image where the watermark would be more hidden to place a stronger watermark. For
+example, the message encoder \(f_\theta\) could take in the cover image too as input
+to give it context for how much to watermark each patch, as in StegaStamp (Tancik et al.)<a href="#ref-3" class="cite">3</a>.
 </p>
 
 
@@ -165,9 +213,32 @@
     <img src="images/metrics/delta_l2.png" alt="delta L2 norm curve">
   </div>
   <figcaption>
-    Bit accuracy, recovery loss, and the latent offset norm (&delta; L2) over training steps.
+    Bit accuracy, recovery loss, and the latent offset norm (\(\delta\) L2) over training steps.
   </figcaption>
 </figure>
+
+<h2>References</h2>
+<ol class="references">
+  <li id="ref-1">
+    Christie's. &ldquo;15 things to know about Frank Stella.&rdquo;
+    <a href="https://www.christies.com/en/stories/15-things-to-know-about-frank-stella-cdb2d362bac44f7fb7567e26ac2e201e">christies.com</a>.
+  </li>
+  <li id="ref-2">
+    Bui, T., Agarwal, S., Yu, N., and Collomosse, J. &ldquo;RoSteALS: Robust Steganography using
+    Autoencoder Latent Space.&rdquo; CVPR Workshops, 2023.
+    <a href="https://arxiv.org/abs/2304.03400">arXiv:2304.03400</a>.
+  </li>
+  <li id="ref-3">
+    Tancik, M., Mildenhall, B., and Ng, R. &ldquo;StegaStamp: Invisible Hyperlinks in Physical
+    Photographs.&rdquo; CVPR, 2020.
+    <a href="https://arxiv.org/abs/1904.05343">arXiv:1904.05343</a>.
+  </li>
+  <li id="ref-4">
+    Esser, P., Rombach, R., and Ommer, B. &ldquo;Taming Transformers for High-Resolution Image
+    Synthesis.&rdquo; CVPR, 2021.
+    <a href="https://arxiv.org/abs/2012.09841">arXiv:2012.09841</a>.
+  </li>
+</ol>
 
 </body>
 </html>

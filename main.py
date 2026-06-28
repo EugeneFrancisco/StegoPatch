@@ -22,7 +22,7 @@ DEBUGGING = 0
 TRAINING = 1
 TESTING = 2
 
-MODE = TRAINING
+MODE = TESTING
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
@@ -188,9 +188,9 @@ def main(
     stegopatch = _build_stegopatch(data_path, device, models_dir, tensorboard_log_dir)
     stegopatch.load_model("results/stegopatch/experiment_2/models/stegopatch_2026-06-27_15-57-27/checkpoint4_epoch_2.pt")
     cover = image_plotting.load_image(
-        Path("data/sample_images/stella/final-herbet-hero.png"),
-        2*IMAGE_SIZE,
-        2*IMAGE_SIZE,
+        Path("data/sample_images/cat/000000236877.png"),
+        IMAGE_SIZE + PATCH_SIZE + PATCH_SIZE,
+        IMAGE_SIZE + PATCH_SIZE + PATCH_SIZE,
     )
     message = np.empty(MESSAGE_LENGTH)
     for i in range(MESSAGE_LENGTH):
@@ -203,12 +203,12 @@ def main(
         cover,
         message,
         {
-            NOISE_JPEG_COMPRESSION: [1, 3, 5],
+            NOISE_JPEG_COMPRESSION: [1, 2, 3],
             NOISE_CROP: None,
             NOISE_ROTATE: [30.0],
             NOISE_DIFFERENTIABLE: None,
         },
-        save_folder=Path("data/sample_images/stella/noise_robustness"),
+        save_folder=Path("data/sample_images/cat/noise_robustness"),
     )
     
 

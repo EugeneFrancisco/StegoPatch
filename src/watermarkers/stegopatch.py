@@ -1080,14 +1080,22 @@ class StegoPatch(ImageWatermarker):
             checkpoint_every: How many batches between ``on_checkpoint`` calls.
 
         Returns:
-            A dict mapping ``"quality_loss"`` and ``"bit_accuracy/{noise_name}"``
-            (one entry per noise type) to their mean over the test set.
+            A dict mapping ``"quality_loss"`` to its mean over the test set, and
+            ``"bit_accuracy/{noise_name}"`` (one entry per noise type) to a dict of
+            whisker-plot statistics (``min``, ``q1``, ``median``, ``q3``, ``max``,
+            ``mean``, ``count``) computed over the per-image bit accuracies of the
+            whole test set.
         """
         assert self.test_set is not None
         assert not self.log_tensorboard
 
         self.message_encoder.eval()
         self.secret_decoder.eval()
+
+        # Evaluate every imagenet-c corruption at the mildest fixed severity (1)
+        # rather than a random severity in the training range, so per-noise bit
+        # accuracy is measured against a single, reproducible corruption strength.
+        self.noiser.set_severity_range([1, 1])
 
         # One bit-accuracy metric per individual noise type (identity, the
         # differentiable chain, each imagenet-c corruption, plus the StegoPatch
@@ -1131,12 +1139,16 @@ class StegoPatch(ImageWatermarker):
                         "quality_loss": self.get_quality_loss(covers, stego_images).item(),
                     }
                     # Pass the same stego batch through each noise type independently.
+                    # Store the per-image bit accuracy (mean over the message bits of
+                    # each image) rather than a single batch mean, so the per-noise
+                    # distribution can be aggregated into whisker-plot statistics.
                     for name, noise_func in noise_functions.items():
                         recovered_messages = self.decode_batch(noise_func(stego_images))
                         predicted_bits = (recovered_messages > 0).float()
-                        record[f"bit_accuracy/{name}"] = (
-                            (predicted_bits == messages).float().mean().item()
+                        per_image_accuracy = (
+                            (predicted_bits == messages).float().mean(dim=1)
                         )
+                        record[f"bit_accuracy/{name}"] = per_image_accuracy.tolist()
 
                     records.append(record)
                     if progress_file is not None:
@@ -1176,14 +1188,46 @@ def _read_progress_records(progress_path: str) -> list[dict]:
     return records
 
 
+def _whisker_stats(values: list[float]) -> dict:
+    """Summarise ``values`` into the statistics needed to draw a box-and-whisker plot:
+    the five-number summary (min, lower quartile, median, upper quartile, max) plus
+    the mean and the sample count."""
+    if not values:
+        return {
+            "min": 0.0, "q1": 0.0, "median": 0.0,
+            "q3": 0.0, "max": 0.0, "mean": 0.0, "count": 0,
+        }
+    arr = np.asarray(values, dtype=np.float64)
+    q1, median, q3 = (float(q) for q in np.percentile(arr, [25, 50, 75]))
+    return {
+        "min": float(arr.min()),
+        "q1": q1,
+        "median": median,
+        "q3": q3,
+        "max": float(arr.max()),
+        "mean": float(arr.mean()),
+        "count": int(arr.size),
+    }
+
+
 def _aggregate_records(records: list[dict], metric_keys: list[str]) -> dict:
-    """Average each metric across the per-batch ``records`` into the final results dict."""
-    results = {key: 0.0 for key in metric_keys}
-    if not records:
-        return results
-    for record in records:
-        for key in metric_keys:
-            results[key] += record[key]
+    """Aggregate the per-batch ``records`` into the final results dict.
+
+    ``quality_loss`` is averaged across batches into a single scalar. Each
+    ``bit_accuracy/{noise}`` metric holds a list of per-image bit accuracies per
+    batch; these are pooled across the whole test set and summarised into
+    whisker-plot statistics (see :func:`_whisker_stats`)."""
+    results: dict = {}
+    if "quality_loss" in metric_keys:
+        results["quality_loss"] = (
+            sum(record["quality_loss"] for record in records) / len(records)
+            if records else 0.0
+        )
     for key in metric_keys:
-        results[key] /= len(records)
+        if key == "quality_loss":
+            continue
+        pooled: list[float] = []
+        for record in records:
+            pooled.extend(record[key])
+        results[key] = _whisker_stats(pooled)
     return results
