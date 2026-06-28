@@ -164,7 +164,7 @@ def main(
     models_dir: str,
     tensorboard_log_dir: str,
 ):
-    stegopatch = stegopatch = _build_stegopatch(
+    stegopatch = _build_stegopatch(
         data_path,
         device,
         models_dir,

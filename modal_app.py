@@ -171,7 +171,7 @@ def test(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULT
     # Build a StegoPatch pointed at the test .npy in the data volume, load the
     # checkpoint, and run the per-noise-type validation.
     stegopatch = train_main._build_stegopatch(
-        data_path=Path(f"{DATA_DIR}/{DATA_FILE}"),
+        data_path=Path(f"{DATA_DIR}/{TEST_FILE}"),
         device="cuda",
         models_dir=f"{OUTPUT_DIR}/models",
         tensorboard_log_dir=f"{OUTPUT_DIR}/runs/stegopatch",
@@ -227,10 +227,5 @@ def evaluate(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RE
 
         modal run modal_app.py::evaluate
         modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
-
-    Uses .spawn() so the run is fire-and-forget and survives client disconnect
-    (works with --detach). Results are written to the rosteals-output volume, so
-    fetch them with `modal volume get` once the run finishes rather than reading
-    them inline.
     """
     test.spawn(checkpoint_path=checkpoint_path, results_path=results_path)
