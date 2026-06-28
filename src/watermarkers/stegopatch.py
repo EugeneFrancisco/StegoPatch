@@ -777,7 +777,7 @@ class StegoPatch(ImageWatermarker):
         # Focus training on jpeg robustness: sample jpeg compression heavily while
         # keeping a little of the other branches so they don't regress. Splitting the
         # imagenet probability per corruption is exactly what makes this possible.
-        self.beta = self.beta_max
+        self.update_flag = True
         self.noiser.set_probabilities(
             p_identity=0.1,
             p_differentiable=0.1,

@@ -22,7 +22,7 @@ DEBUGGING = 0
 TRAINING = 1
 TESTING = 2
 
-MODE = TESTING
+MODE = TRAINING
 
 DATA_DIR = Path("data/train2017")
 # vq-f4 was trained on 256x256 crops, so we work at that resolution.
@@ -62,9 +62,9 @@ H_LITTLE = PATCH_SIZE / 8
 W_LITTLE = PATCH_SIZE / 8
 C_LITTLE = 3
 ALPHA = 1.5
-BETA_MIN = 0.08
-BETA_MAX = 11
-BETA_DELTA = (BETA_MAX - BETA_MIN) / 6_000 # just from observation, it seems like 5k steps till convergence roughly
+BETA_MIN = 11
+BETA_MAX = 12.5
+BETA_DELTA = (BETA_MAX - BETA_MIN) / 6_000
 LEARNING_RATE = 2e-5
 # How often (in steps) to overwrite the rolling auto-resume checkpoint so a run
 # that gets restarted (e.g. by Modal) can pick back up where it left off.
