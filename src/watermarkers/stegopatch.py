@@ -876,5 +876,61 @@ class StegoPatch(ImageWatermarker):
         loss_recovery = utils.bce_loss(recovered_messages, messages)
         return loss_recovery
 
-    def validate(self):
-        pass
+    def validate(self) -> dict:
+        """
+        Measures bit accuracy on the held-out test set, reporting it per individual
+        noise type so robustness can be read off one corruption at a time rather
+        than against a random blend. Mirrors :meth:`RoSteALS.validate`, but because
+        the noise types come from the StegoPatch noiser's
+        :meth:`StegoPatchNoiser.named_noise_functions`, the per-type breakdown also
+        includes the StegoPatch-specific ``crop`` and ``rotate`` branches alongside
+        identity, the differentiable chain, and each imagenet-c corruption.
+
+        ``crop`` and ``rotate`` change the spatial dimensions of the batch, but the
+        secret decoder is fully convolutional with a final adaptive average pool, so
+        it consumes the resized batches without issue. Quality loss is always
+        measured against the clean (un-noised) stego image, whose dimensions match
+        the cover.
+
+        Returns:
+            A dict mapping ``"quality_loss"`` and ``"bit_accuracy/{noise_name}"``
+            (one entry per noise type) to their mean over the test set.
+        """
+        assert self.test_set is not None
+        assert not self.log_tensorboard
+
+        self.message_encoder.eval()
+        self.secret_decoder.eval()
+
+        # One bit-accuracy metric per individual noise type (identity, the
+        # differentiable chain, each imagenet-c corruption, plus the StegoPatch
+        # crop and rotate branches), so robustness can be read off per corruption
+        # instead of against a random blend.
+        noise_functions = self.noiser.named_noise_functions()
+        results = {"quality_loss": 0.0}
+        results.update({f"bit_accuracy/{name}": 0.0 for name in noise_functions})
+
+        loader = DataLoader(self.test_set, self.batch_size, shuffle=False)
+        num_steps = len(loader)
+
+        with torch.no_grad():
+            for covers in tqdm(loader, desc="steps"):
+                covers = covers.to(self.device)
+                messages = torch.randint(
+                    0, 2, (covers.shape[0], self.message_length), device=self.device
+                ).float()
+                stego_images = self.encode_batch(covers, messages)
+                results["quality_loss"] += self.get_quality_loss(covers, stego_images).item()
+
+                # Pass the same stego batch through each noise type independently.
+                for name, noise_func in noise_functions.items():
+                    recovered_messages = self.decode_batch(noise_func(stego_images))
+                    predicted_bits = (recovered_messages > 0).float()
+                    results[f"bit_accuracy/{name}"] += (
+                        (predicted_bits == messages).float().mean().item()
+                    )
+
+        for key in results:
+            results[key] /= num_steps
+
+        return results
