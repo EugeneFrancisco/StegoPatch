@@ -1,6 +1,7 @@
 """
 This file defines the StegoPatch Watermarking class.
 """
+import json
 import os
 from collections import deque
 from datetime import datetime
@@ -879,21 +880,38 @@ class StegoPatch(ImageWatermarker):
         loss_recovery = utils.bce_loss(recovered_messages, messages)
         return loss_recovery
 
-    def validate(self) -> dict:
+    def validate(
+        self,
+        progress_path: str | None = None,
+        on_checkpoint=None,
+        checkpoint_every: int = 10,
+    ) -> dict:
         """
         Measures bit accuracy on the held-out test set, reporting it per individual
-        noise type so robustness can be read off one corruption at a time rather
-        than against a random blend. Mirrors :meth:`RoSteALS.validate`, but because
-        the noise types come from the StegoPatch noiser's
-        :meth:`StegoPatchNoiser.named_noise_functions`, the per-type breakdown also
-        includes the StegoPatch-specific ``crop`` and ``rotate`` branches alongside
-        identity, the differentiable chain, and each imagenet-c corruption.
+        noise type.
 
         ``crop`` and ``rotate`` change the spatial dimensions of the batch, but the
         secret decoder is fully convolutional with a final adaptive average pool, so
         it consumes the resized batches without issue. Quality loss is always
         measured against the clean (un-noised) stego image, whose dimensions match
         the cover.
+
+        Checkpointing: when ``progress_path`` is given, each batch's metrics are
+        appended as one JSON line to that file as soon as they are computed, and
+        ``on_checkpoint`` (if given) is called every ``checkpoint_every`` batches to
+        flush the file to durable storage (e.g. a Modal volume commit). If the file
+        already holds records from a previous run, those batches are skipped and
+        validation resumes where it left off — the loader is deterministic
+        (``shuffle=False``), so batch *i* is always the same images. A run that
+        times out therefore loses at most ``checkpoint_every`` batches of work.
+
+        Args:
+            progress_path: Path to an append-only JSONL file used to persist and
+                resume per-batch metrics. ``None`` disables checkpointing.
+            on_checkpoint: Zero-arg callable invoked after a batch is flushed, every
+                ``checkpoint_every`` batches and once more at the end, to persist the
+                file durably. ``None`` disables durable flushing.
+            checkpoint_every: How many batches between ``on_checkpoint`` calls.
 
         Returns:
             A dict mapping ``"quality_loss"`` and ``"bit_accuracy/{noise_name}"``
@@ -910,8 +928,7 @@ class StegoPatch(ImageWatermarker):
         # crop and rotate branches), so robustness can be read off per corruption
         # instead of against a random blend.
         noise_functions = self.noiser.named_noise_functions()
-        results = {"quality_loss": 0.0}
-        results.update({f"bit_accuracy/{name}": 0.0 for name in noise_functions})
+        metric_keys = ["quality_loss"] + [f"bit_accuracy/{name}" for name in noise_functions]
 
         # Cap validation to the first validation_set_size images of the test set
         # so we don't pay for the full ~40k every time.
@@ -922,24 +939,85 @@ class StegoPatch(ImageWatermarker):
         loader = DataLoader(test_set, self.batch_size, shuffle=False)
         num_steps = len(loader)
 
-        with torch.no_grad():
-            for covers in tqdm(loader, desc="steps"):
-                covers = covers.to(self.device)
-                messages = torch.randint(
-                    0, 2, (covers.shape[0], self.message_length), device=self.device
-                ).float()
-                stego_images = self.encode_batch(covers, messages)
-                results["quality_loss"] += self.get_quality_loss(covers, stego_images).item()
+        # Reload any per-batch records left by a previous (e.g. timed-out) run and
+        # resume after the last one. Records are assumed contiguous from batch 0.
+        records = _read_progress_records(progress_path) if progress_path else []
+        start_batch = len(records)
+        if start_batch >= num_steps:
+            return _aggregate_records(records, metric_keys)
+        if start_batch:
+            print(f"Resuming validation from batch {start_batch}/{num_steps}", flush=True)
 
-                # Pass the same stego batch through each noise type independently.
-                for name, noise_func in noise_functions.items():
-                    recovered_messages = self.decode_batch(noise_func(stego_images))
-                    predicted_bits = (recovered_messages > 0).float()
-                    results[f"bit_accuracy/{name}"] += (
-                        (predicted_bits == messages).float().mean().item()
-                    )
+        progress_file = open(progress_path, "a", encoding="utf-8") if progress_path else None
+        try:
+            with torch.no_grad():
+                for i, covers in enumerate(tqdm(loader, desc="steps")):
+                    if i < start_batch:
+                        continue
+                    covers = covers.to(self.device)
+                    messages = torch.randint(
+                        0, 2, (covers.shape[0], self.message_length), device=self.device
+                    ).float()
+                    stego_images = self.encode_batch(covers, messages)
 
-        for key in results:
-            results[key] /= num_steps
+                    record = {
+                        "batch": i,
+                        "quality_loss": self.get_quality_loss(covers, stego_images).item(),
+                    }
+                    # Pass the same stego batch through each noise type independently.
+                    for name, noise_func in noise_functions.items():
+                        recovered_messages = self.decode_batch(noise_func(stego_images))
+                        predicted_bits = (recovered_messages > 0).float()
+                        record[f"bit_accuracy/{name}"] = (
+                            (predicted_bits == messages).float().mean().item()
+                        )
 
+                    records.append(record)
+                    if progress_file is not None:
+                        progress_file.write(json.dumps(record) + "\n")
+                        progress_file.flush()
+                        if on_checkpoint is not None and (i + 1) % checkpoint_every == 0:
+                            on_checkpoint()
+        finally:
+            if progress_file is not None:
+                progress_file.close()
+                if on_checkpoint is not None:
+                    on_checkpoint()  # flush the tail batches written since the last commit
+
+        return _aggregate_records(records, metric_keys)
+
+
+def _read_progress_records(progress_path: str) -> list[dict]:
+    """Read per-batch metric records previously appended to ``progress_path``.
+
+    Returns an empty list if the file does not exist yet. A trailing line that
+    fails to parse (a torn write from a process killed mid-flush) is dropped, so
+    resume picks up from the last fully-written batch.
+    """
+    if not os.path.exists(progress_path):
+        return []
+
+    records = []
+    with open(progress_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                break  # torn final line; everything before it is intact
+    return records
+
+
+def _aggregate_records(records: list[dict], metric_keys: list[str]) -> dict:
+    """Average each metric across the per-batch ``records`` into the final results dict."""
+    results = {key: 0.0 for key in metric_keys}
+    if not records:
         return results
+    for record in records:
+        for key in metric_keys:
+            results[key] += record[key]
+    for key in metric_keys:
+        results[key] /= len(records)
+    return results

@@ -62,6 +62,10 @@ RESTART_CHECKPOINT = f"{OUTPUT_DIR}/restart/checkpoint.pt"
 # file the per-noise-type validation results get written to (both in rosteals-output).
 TEST_CHECKPOINT = f"{OUTPUT_DIR}/restart/checkpoint.pt"
 TEST_RESULTS = f"{OUTPUT_DIR}/test_results.txt"
+# Append-only JSONL file that validation streams per-batch metrics to so an evaluate
+# run that times out can be resumed instead of restarted from scratch. Delete it
+# (modal volume rm rosteals-output test_results_progress.jsonl) to force a fresh run.
+TEST_PROGRESS = f"{OUTPUT_DIR}/test_results_progress.jsonl"
 
 
 def _download_pretrained_weights():
@@ -165,7 +169,11 @@ def restart(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
     volumes={DATA_DIR: data_volume, OUTPUT_DIR: output_volume},
     timeout=60 * 60,
 )
-def test(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULTS):
+def test(
+    checkpoint_path: str = TEST_CHECKPOINT,
+    results_path: str = TEST_RESULTS,
+    progress_path: str = TEST_PROGRESS,
+):
     import main as train_main
 
     # Build a StegoPatch pointed at the test .npy in the data volume, load the
@@ -178,7 +186,14 @@ def test(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULT
         test_set_path=Path(f"{DATA_DIR}/{TEST_FILE}"),
     )
     stegopatch.load_model(checkpoint_path)
-    results = stegopatch.validate()
+    # Stream per-batch metrics to the volume so a timeout can be resumed: re-running
+    # evaluate picks up where this left off. output_volume.commit() is the durable
+    # flush (in-container file writes are ephemeral until committed).
+    results = stegopatch.validate(
+        progress_path=progress_path,
+        on_checkpoint=output_volume.commit,
+        checkpoint_every=10,
+    )
     print(results)
 
     try:
@@ -218,14 +233,28 @@ def resume(save_path: str = RESTART_CHECKPOINT, checkpoint: int = 1):
 
 
 @app.local_entrypoint()
-def evaluate(checkpoint_path: str = TEST_CHECKPOINT, results_path: str = TEST_RESULTS):
+def evaluate(
+    checkpoint_path: str = TEST_CHECKPOINT,
+    results_path: str = TEST_RESULTS,
+    progress_path: str = TEST_PROGRESS,
+):
     """Run per-noise-type validation on a checkpoint living in the rosteals-output volume.
 
-    Results are written to a text file in the rosteals-output volume.
+    Results are written to a text file in the rosteals-output volume. Per-batch
+    metrics are streamed to ``progress_path`` (a JSONL file) as the run proceeds, so
+    if the run times out you can simply re-run this command and it resumes from the
+    last committed batch instead of starting over. To force a fresh run, delete the
+    progress file first:
+
+        modal volume rm rosteals-output test_results_progress.jsonl
 
     Usage:
 
         modal run modal_app.py::evaluate
         modal run modal_app.py::evaluate --checkpoint-path /output/models/rosteals_.../checkpoint5.pt
     """
-    test.spawn(checkpoint_path=checkpoint_path, results_path=results_path)
+    test.spawn(
+        checkpoint_path=checkpoint_path,
+        results_path=results_path,
+        progress_path=progress_path,
+    )
