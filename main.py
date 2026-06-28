@@ -63,8 +63,8 @@ W_LITTLE = PATCH_SIZE / 8
 C_LITTLE = 3
 ALPHA = 1.5
 BETA_MIN = 11
-BETA_MAX = 12.5
-BETA_DELTA = (BETA_MAX - BETA_MIN) / 6_000
+BETA_MAX = 15
+BETA_DELTA = (BETA_MAX - BETA_MIN) / 4_500
 LEARNING_RATE = 2e-5
 # How often (in steps) to overwrite the rolling auto-resume checkpoint so a run
 # that gets restarted (e.g. by Modal) can pick back up where it left off.

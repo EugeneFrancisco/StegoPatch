@@ -767,7 +767,7 @@ class StegoPatch(ImageWatermarker):
                 self.dataset,
                 max_epochs=self.num_epochs,
                 progress_bar="step",
-                save_interval_epochs=1,
+                save_interval_steps=5_000,
                 start_time=start_time,
                 checkpoint=4,
             )
@@ -779,11 +779,11 @@ class StegoPatch(ImageWatermarker):
         # imagenet probability per corruption is exactly what makes this possible.
         self.update_flag = True
         self.noiser.set_probabilities(
-            p_identity=0.1,
-            p_differentiable=0.1,
-            p_imagenet={NOISE_JPEG_COMPRESSION: 0.6},
-            p_crop=0.1,
-            p_rotate=0.1,
+            p_identity=0.125,
+            p_differentiable=0.125,
+            p_imagenet={NOISE_JPEG_COMPRESSION: 0.5},
+            p_crop=0.125,
+            p_rotate=0.125,
         )
         self.noiser.set_severity_range([1, 3])
 
