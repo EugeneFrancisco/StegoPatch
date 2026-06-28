@@ -890,12 +890,6 @@ class StegoPatch(ImageWatermarker):
         Measures bit accuracy on the held-out test set, reporting it per individual
         noise type.
 
-        ``crop`` and ``rotate`` change the spatial dimensions of the batch, but the
-        secret decoder is fully convolutional with a final adaptive average pool, so
-        it consumes the resized batches without issue. Quality loss is always
-        measured against the clean (un-noised) stego image, whose dimensions match
-        the cover.
-
         Checkpointing: when ``progress_path`` is given, each batch's metrics are
         appended as one JSON line to that file as soon as they are computed, and
         ``on_checkpoint`` (if given) is called every ``checkpoint_every`` batches to
