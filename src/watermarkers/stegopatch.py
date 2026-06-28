@@ -168,6 +168,9 @@ class StegoPatch(ImageWatermarker):
 
         # ====== validation material =========
         self.test_set = self.configs.get("test_set", None)
+        # Validating on the full ~40k test set is slow; cap validation to the first
+        # this-many images. None means use the entire test set.
+        self.validation_set_size = self.configs.get("validation_set_size", None)
 
     def setup_message_encoder(self) -> nn.Module:
         """
@@ -910,7 +913,13 @@ class StegoPatch(ImageWatermarker):
         results = {"quality_loss": 0.0}
         results.update({f"bit_accuracy/{name}": 0.0 for name in noise_functions})
 
-        loader = DataLoader(self.test_set, self.batch_size, shuffle=False)
+        # Cap validation to the first validation_set_size images of the test set
+        # so we don't pay for the full ~40k every time.
+        test_set = self.test_set
+        if self.validation_set_size is not None:
+            test_set = Subset(test_set, range(min(self.validation_set_size, len(test_set))))
+
+        loader = DataLoader(test_set, self.batch_size, shuffle=False)
         num_steps = len(loader)
 
         with torch.no_grad():

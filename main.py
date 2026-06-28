@@ -24,6 +24,9 @@ PATCH_SIZE = 96
 IMAGE_SIZE = 384
 CROP_SIZE = 288
 MESSAGE_LENGTH = 20
+# The full test set has ~40k images; validating on the first 20k is plenty and
+# roughly halves validation time.
+VALIDATION_SET_SIZE = 20_000
 P_CROP = 0.25
 P_ROTATE = 0.25
 P_IDENTITY = 0.5
@@ -120,6 +123,7 @@ def build_configs(
         "learning_rate": LEARNING_RATE,
         "dataset": dataset,
         "test_set": test_set,
+        "validation_set_size": VALIDATION_SET_SIZE,
         "batch_size": BATCH_SIZE,
         "num_epochs": NUM_EPOCHS,
         "num_epochs_for_small_batch": NUM_EPOCHS_FOR_SMALL_BATCH,
